@@ -1,5 +1,6 @@
 import torch
 
+from model.gnet import GNet
 from dataloader.detLoader import detLoader
 
 def main():
@@ -7,16 +8,26 @@ def main():
         Main program for begining training
     """
     print ("Loading training dataset, "),
-    trainData = detLoader("../FactorizableNet/rpn_boxes/vrd/pre_nms_test")
+    trainData = detLoader("./data/vrd/train/")
     print ("{} files loaded".format(len(trainData)))
 
-    trainLoader = torch.utils.data.DataLoader(trainData, batch_size=1, shuffle=True)
+    trainLoader = torch.utils.data.DataLoader(trainData, 
+                                                batch_size=1, 
+                                                shuffle=True,
+                                                collate_fn=detLoader.collate)
 
     ## testing trainLoader
+    # for i, batch in enumerate(trainLoader):
+    #     print (i) # batch_number
+    #     print (type(batch)) # dict
+    #     print (batch.keys()) # ['proposals', 'scores']
+    #     print (len(batch['detections'])) # 15000 - limited by configuration in fnet - can modify - may vary with image (<=)
+    #     break
+
+    ## testing box-feature extraction functions
+    net = GNet(num_classes=70, num_blocks=1)
     for i, batch in enumerate(trainLoader):
-        print (type(batch)) # dict
-        print (batch.keys()) # ['proposals', 'scores']
-        print (len(batch['proposals'])) # 12000 - limited by configuration in fnet - can modify - may vary with image (<=)
+        net.forward(data=batch)
         break
 
     ## begining training

@@ -1,6 +1,8 @@
 import os
 import json
 
+import numpy as np
+
 import torch.utils.data as data
 
 class detLoader(data.Dataset):
@@ -27,10 +29,24 @@ class detLoader(data.Dataset):
         """
         selected_file = self.files[index]
 
-        # read in the json file
-        detections = json.load(open(os.path.join(self.data_dir, selected_file)))
+        # read in the json file - detections and ground truth
+        data = json.load(open(os.path.join(self.data_dir, selected_file)))
 
-        return detections
+        # convert from list ot numpy arrays
+        data['detections'] = np.array(data['detections'])
+        data['gt_boxes'] = np.array(data['gt_boxes'])
+        data['scores'] = np.array(data['scores'])
+
+        return data
+
+    @staticmethod
+    def collate(items):
+        """
+            Will specify how the batch items fetched by the data loader are grouped together
+            For our case custom writing it for batch_size - 1
+        """
+        # return batch items as a list
+        return items
 
     def __len__(self):
         """
