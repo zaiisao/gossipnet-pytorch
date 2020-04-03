@@ -1,3 +1,5 @@
+import copy
+
 import numpy as np
 
 import torch
@@ -29,21 +31,36 @@ class Block(nn.Module):
 		self.blockInnerDim = 2 * 32 # why is it defined like this?
 		self.block_pwfeat_fc_layers = []
 		self.block_pwfeat_fc_layers.append(nn.Sequential(
-												nn.Linear(3*32, self.blockInnerDim, bias=True),
-												nn.ReLU(inplace=True)
-											))
+											nn.Linear(3*32, self.blockInnerDim, bias=True),
+											nn.ReLU(inplace=True)
+										))
 		for _ in range(self.num_block_pwfeat_fc-1):
 			self.block_pwfeat_fc_layers.append(nn.Sequential(
-													nn.Linear(self.blockInnerDim, self.blockInnerDim, bias=True),
-													nn.ReLU(inplace=True)
-												))
+												nn.Linear(self.blockInnerDim, self.blockInnerDim, bias=True),
+												nn.ReLU(inplace=True)
+											))
 		self.block_pwfeat_fc_layers = nn.ModuleList(self.block_pwfeat_fc_layers)
 
+		# FC layers for post max-pooling
+		self.num_block_pwfeat_postmax_fc = 2
+		self.block_pwfeat_postmax_fc_layers = []
+		for _ in range(self.num_block_pwfeat_postmax_fc):
+			self.block_pwfeat_postmax_fc_layers.append(nn.Sequential(
+														nn.Linear(self.blockInnerDim, self.blockInnerDim, bias=True),
+														nn.ReLU(inplace=True)
+													))
+		self.block_pwfeat_postmax_fc_layers = nn.ModuleList(self.block_pwfeat_postmax_fc_layers)
+
+		# making dimensions back to 'shortcutDim'
+		self.outputFC = nn.Sequential(
+							nn.Linear(self.blockInnerDim, self.shortcutDim, bias=True)
+						)
+		self.outputReLU = nn.ReLU(inplace=True)
 
 	def forward(self, detFeatures, cIdxs, nIdxs, pairFeatures):
 		"""
 			Input
-				detFeatures: RPN detections features, (?, 128)
+				detFeatures: RPN detections features, (#detections, 128)
 		"""
 		block_fc1_feats = self.fc1(detFeatures)
 		block_fc1_neighbor_feats = block_fc1_feats
@@ -56,6 +73,8 @@ class Block(nn.Module):
 		for layer in self.block_pwfeat_fc_layers:
 			combinedFeatures = layer(combinedFeatures)
 
+		maxPooledFeatures = None
+
 		# max pooling across neighbours (based on cIdxs)
 		# don't have a pytorch alternative for segment_max - using a loop for now - TODO: find a better alternative
 		numDets = torch.max(cIdxs) + 1 # temp jugaad!
@@ -65,22 +84,32 @@ class Block(nn.Module):
 			detNeighboursBoolean = torch.eq(cIdxs, i)
 			featNeighbours = combinedFeatures[detNeighboursBoolean]
 
-			# doing max pooling - across neighbours
-			featNeighbours = torch.max(featNeighbours, 0, keepdim=True)[0]
-
 			# verfiying that we read all the detections
 			detCheck += featNeighbours.shape[0]
 
-			break
-			
-		
+			# doing max pooling - across neighbours
+			featNeighbours = torch.max(featNeighbours, 0, keepdim=True)[0]
+
+			# concatenating all 
+			if (maxPooledFeatures is not None):
+				maxPooledFeatures = torch.cat((maxPooledFeatures, featNeighbours))
+			else:
+				maxPooledFeatures = featNeighbours
+
 		if (detCheck != cIdxs.shape[0]):
-			raise "missed detections - detection sizes mismatch"
+			raise Exception("missed detections - detection sizes mismatch")
 
-		print (detCheck)
-		print ("cIdxs shape: {}".format(cIdxs.shape))
-		print ("combinedFeatures.shape: {}".format(combinedFeatures.shape))
+		# post max-pooling FC layers
+		for layer in self.block_pwfeat_postmax_fc_layers:
+			maxPooledFeatures = layer(maxPooledFeatures)
+	
+		# last FC layer
+		detFeaturesRefined = self.outputFC(maxPooledFeatures)
+		
+		outFeatures = detFeatures + detFeaturesRefined
+		outFeatures = self.outputReLU(outFeatures)
 
+		return outFeatures
 
 
 class GNet(nn.Module):
@@ -126,6 +155,7 @@ class GNet(nn.Module):
 		self.shortcutDim = 128
 		self.numBlocks = numBlocks
 		self.singleBlock = Block()
+		self.blockLayers = nn.ModuleList([copy.deepcopy(self.singleBlock) for _ in range(self.numBlocks)])
 
 	def forward(self, data):
 		"""
@@ -172,7 +202,12 @@ class GNet(nn.Module):
 		# input to the first block must be all zero's
 		startingFeatures = torch.zeros([numDets, self.shortcutDim], dtype=torch.float32)
 		
-		self.singleBlock(startingFeatures, pair_c_idxs, pair_n_idxs, pairFeatures)
+		# getting refined features
+		detFeatures = startingFeatures
+		for layer in self.blockLayers:
+			detFeatures = layer(detFeatures, pair_c_idxs, pair_n_idxs, pairFeatures)
+		
+		# 
 
 	def pairwiseFeaturesFC(self, pairFeatures):
 		"""
