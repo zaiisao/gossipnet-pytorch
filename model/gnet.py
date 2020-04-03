@@ -128,6 +128,9 @@ class GNet(nn.Module):
 
 		self.numClasses = numClasses
 		self.neighbourIoU = 0.3	
+		self.classWeights = classWeights
+		if self.classWeights is None:
+			self.classWeights = torch.ones(numClasses + 1, dtype=torch.float32)
 
 		# FC layers to generate pairwise features
 		self.pwfeatRawInput = 9
@@ -151,11 +154,16 @@ class GNet(nn.Module):
 									))
 		self.pwfeat_gen_layers = nn.ModuleList(self.pwfeat_gen_layers)
 
-		# 'block'
+		# 'block' layers
 		self.shortcutDim = 128
 		self.numBlocks = numBlocks
 		self.singleBlock = Block()
 		self.blockLayers = nn.ModuleList([copy.deepcopy(self.singleBlock) for _ in range(self.numBlocks)])
+
+		# new scores - a single (1) score per detection
+		self.predictObjectnessScores = nn.Sequential(
+									nn.Linear(self.shortcutDim, 1, bias=True),
+								)
 
 	def forward(self, data):
 		"""
@@ -207,7 +215,69 @@ class GNet(nn.Module):
 		for layer in self.blockLayers:
 			detFeatures = layer(detFeatures, pair_c_idxs, pair_n_idxs, pairFeatures)
 		
-		# 
+		# predicting new scores
+		objectnessScores = self.predictObjectnessScores(detFeatures)
+
+		### label matching for training
+		# original implementation works on COCO dataset and has 'gt_crowd' detections
+		# 'gt_crowd' detections are handled in a different way - making the logic complicated
+		# since we are using VRD (and VG later) datasets, our logic doesn't have to be complicated
+		labels, dt_gt_matching = self.dtGtMatching(dt_gt_iou, objectnessScores)
+
+		p
+		
+
+	@staticmethod
+	def dtGtMatching(dt_gt_iou, objectnessScores, iouThresh=0.5):
+		"""
+			Matching detections with ground truth labels using the recomputed objectness score, each gt is matched with 
+			exactly one detection
+			Input:
+				dt_gt_iou: IoU between detections and ground truth bbox's
+				objectnessScores: Recomputed scores for the detections
+				iouThresh: iou-threshold for the detections to be considered as positives
+			Return:
+				labels: Boolean tensor representing which detections are to be treated as true positives
+				dt_gt_matching: which detection gets matched to which gt
+		"""
+		# sorting objectness score - getting their index's 
+		objectnessScores = objectnessScores.reshape(-1)
+		sortedIndexs = torch.argsort(objectnessScores, descending=True)
+
+		numDts = dt_gt_iou.shape[0]
+		numGts = dt_gt_iou.shape[1]
+
+		# each gt need to be matched exactly once
+		isGtMatched = torch.zeros(numGts, dtype=torch.int32)
+
+		labels = torch.zeros(numDts, dtype=torch.int32)
+		dt_gt_matching = torch.zeros(numDts, dtype=torch.int32)
+		dt_gt_matching.fill_(-1)
+
+		for i in range(numDts):
+			dtIndex = sortedIndexs[i]
+			iou = iouThresh
+			match = -1
+
+			for gtIndex in range(numGts):
+				# is gt already matched
+				if isGtMatched[gtIndex] == 1:
+					continue
+
+				# continue until we get a better detection
+				if dt_gt_iou[dtIndex, gtIndex] < iou:
+					continue
+				
+				# store the best detection
+				iou = dt_gt_iou[dtIndex, gtIndex]
+				match = gtIndex
+
+			if (match > -1):
+				isGtMatched[match] = 1
+				labels[dtIndex] = 1
+				dt_gt_matching[dtIndex] = match
+
+		return (labels, dt_gt_matching)
 
 	def pairwiseFeaturesFC(self, pairFeatures):
 		"""
