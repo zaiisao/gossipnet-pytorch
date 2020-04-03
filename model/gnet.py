@@ -8,28 +8,80 @@ class Block(nn.Module):
 	"""
 		Single 'block' architecture
 	"""
-	def __inti__(self):
+	def __init__(self):
 		"""
 			Initializing 'block' architecture
 		"""
-		# TODO: move architecture specific dimensions to a central configuration file
-		self.shortcut_dim = 128
-		self.reduced_dim = 32
+		super(Block, self).__init__()
 
-		# first fully connected layer - input will be the dimensions for each box
+		# TODO: move architecture specific dimensions to a central configuration file
+		self.shortcutDim = 128
+		self.reducedDim = 32
+
+		# FC layer for input detection - input will be the dimensions for each box
 		self.fc1 = nn.Sequential(
-						nn.Linear(self.shortcut_dim, self.reduced_dim, bias=True),
+						nn.Linear(self.shortcutDim, self.reducedDim, bias=True),
 						nn.ReLU(inplace=True)
 					)
 
-	def forward(self, data):
+		# FC layers for pairwise features
+		self.num_block_pwfeat_fc = 2 # keep it >=1
+		self.blockInnerDim = 2 * 32 # why is it defined like this?
+		self.block_pwfeat_fc_layers = []
+		self.block_pwfeat_fc_layers.append(nn.Sequential(
+												nn.Linear(3*32, self.blockInnerDim, bias=True),
+												nn.ReLU(inplace=True)
+											))
+		for _ in range(self.num_block_pwfeat_fc-1):
+			self.block_pwfeat_fc_layers.append(nn.Sequential(
+													nn.Linear(self.blockInnerDim, self.blockInnerDim, bias=True),
+													nn.ReLU(inplace=True)
+												))
+		self.block_pwfeat_fc_layers = nn.ModuleList(self.block_pwfeat_fc_layers)
+
+
+	def forward(self, detFeatures, cIdxs, nIdxs, pairFeatures):
 		"""
 			Input
-				data: Detections, format?
+				detFeatures: RPN detections features, (?, 128)
 		"""
-		block_fc1_feats = self.fc1(data)
+		block_fc1_feats = self.fc1(detFeatures)
 		block_fc1_neighbor_feats = block_fc1_feats
 		
+		cFeats = block_fc1_feats[cIdxs]
+		nFeats = block_fc1_neighbor_feats[nIdxs]
+
+		combinedFeatures = torch.cat((pairFeatures, cFeats, nFeats), 1)
+
+		for layer in self.block_pwfeat_fc_layers:
+			combinedFeatures = layer(combinedFeatures)
+
+		# max pooling across neighbours (based on cIdxs)
+		# don't have a pytorch alternative for segment_max - using a loop for now - TODO: find a better alternative
+		numDets = torch.max(cIdxs) + 1 # temp jugaad!
+		detCheck = 0
+		for i in range(numDets):
+			# extracting neighbour features
+			detNeighboursBoolean = torch.eq(cIdxs, i)
+			featNeighbours = combinedFeatures[detNeighboursBoolean]
+
+			# doing max pooling - across neighbours
+			featNeighbours = torch.max(featNeighbours, 0, keepdim=True)[0]
+
+			# verfiying that we read all the detections
+			detCheck += featNeighbours.shape[0]
+
+			break
+			
+		
+		if (detCheck != cIdxs.shape[0]):
+			raise "missed detections - detection sizes mismatch"
+
+		print (detCheck)
+		print ("cIdxs shape: {}".format(cIdxs.shape))
+		print ("combinedFeatures.shape: {}".format(combinedFeatures.shape))
+
+
 
 class GNet(nn.Module):
 	"""
@@ -43,13 +95,37 @@ class GNet(nn.Module):
 				num_blocks: Number of blocks to be defined in the network
 				class_weights: ?
 		"""
-		# ?
 		super(GNet, self).__init__()
 
 		self.numClasses = numClasses
-		self.numBlocks = numBlocks
+		self.neighbourIoU = 0.3	
 
-		self.neighbourIoU = 0.2
+		# FC layers to generate pairwise features
+		self.pwfeatRawInput = 9
+		self.pwfeatInnerDim = 256
+		self.pwfeatOutDim = 32
+		self.num_pwfeat_fc = 3 # keep it >= 3 for now!
+		# TODO: weight and bias initialization
+		self.pwfeat_gen_layers = []
+		self.pwfeat_gen_layers.append(nn.Sequential(
+										nn.Linear(self.pwfeatRawInput, self.pwfeatInnerDim, bias=True),
+										nn.ReLU(inplace=True)
+									))
+		for _ in range(self.num_pwfeat_fc-2):
+			self.pwfeat_gen_layers.append(nn.Sequential(
+											nn.Linear(self.pwfeatInnerDim, self.pwfeatInnerDim, bias=True),
+											nn.ReLU(inplace=True)
+										))
+		self.pwfeat_gen_layers.append(nn.Sequential(
+										nn.Linear(self.pwfeatInnerDim, self.pwfeatOutDim, bias=True),
+										nn.ReLU(inplace=True)
+									))
+		self.pwfeat_gen_layers = nn.ModuleList(self.pwfeat_gen_layers)
+
+		# 'block'
+		self.shortcutDim = 128
+		self.numBlocks = numBlocks
+		self.singleBlock = Block()
 
 	def forward(self, data):
 		"""
@@ -59,10 +135,13 @@ class GNet(nn.Module):
 		data = data[0]
 
 		# 15000 boxes are too much for now - reducing - change later
-		dtBoxes = data['detections'][:2000]
-		gtBoxes = data['gt_boxes']
+		no_detections = 1000
 
-		# moving computations to tensors for fast computations
+		detScores = data['scores'][:no_detections]
+		dtBoxes = data['detections'][:no_detections]
+		gtBoxes = data['gt_boxes']		
+		
+		detScores = torch.from_numpy(detScores)
 		dtBoxes = torch.from_numpy(dtBoxes)
 		gtBoxes = torch.from_numpy(gtBoxes)
 
@@ -78,12 +157,75 @@ class GNet(nn.Module):
 		# we don't have classes for detections - just the gt_classes
 		# so doing single class nms - discuss on this!
 
-		# finding neighbours of all detections
-		neighbourPairIds = torch.where(torch.ge(dt_dt_iou, self.neighbourIoU))
+		# finding neighbours of all detections - torch.nonzero() equivalent of tf.where(condition)
+		neighbourPairIds = torch.nonzero(torch.ge(dt_dt_iou, self.neighbourIoU))
+		pair_c_idxs = neighbourPairIds[:, 0]
+		pair_n_idxs = neighbourPairIds[:, 1]
 
-		print (neighbourPairIds.shape)
+		# generating pairwise features
+		pairFeatures = self.generatePairwiseFeatures(pair_c_idxs, pair_n_idxs, neighbourPairIds, detScores, dt_dt_iou, dtBoxesData)
+		pairFeatures = pairFeatures.float() # can we fix this?
+		pairFeatures = self.pairwiseFeaturesFC(pairFeatures)
+		
+		numDets = dtBoxes.shape[0]
 
-		# input to the first block must be all zero
+		# input to the first block must be all zero's
+		startingFeatures = torch.zeros([numDets, self.shortcutDim], dtype=torch.float32)
+		
+		self.singleBlock(startingFeatures, pair_c_idxs, pair_n_idxs, pairFeatures)
+
+	def pairwiseFeaturesFC(self, pairFeatures):
+		"""
+			Fully connected layers to generate pairwise features
+		"""
+		for layer in self.pwfeat_gen_layers:
+			pairFeatures = layer(pairFeatures)
+
+		return pairFeatures
+
+	@staticmethod
+	def generatePairwiseFeatures(c_idxs, n_idxs, neighbourPairIds, detScores, dt_dt_iou, dtBoxesData):
+		"""
+			Function to compute pairwise features for detections
+		"""
+		# we don't have multi-class score for detections just the objectness-score
+
+		# getting objectness-score
+		cScores = detScores[c_idxs]
+		nScores = detScores[n_idxs]
+
+		# gathering ious values between pairs
+		ious = dt_dt_iou[neighbourPairIds[:, 0], neighbourPairIds[:, 1]].reshape(-1, 1)
+
+		x1, y1, w, h, _, _, _ = dtBoxesData
+		c_w = w[c_idxs]
+		c_h = h[c_idxs]
+		c_scale = (c_w + c_h) / 2.0
+		c_cx = x1[c_idxs] + c_w / 2.0
+		c_cy = y1[c_idxs] + c_h / 2.0
+		
+		n_w = w[n_idxs]
+		n_h = h[n_idxs]
+		n_cx = x1[n_idxs] + n_w / 2.0
+		n_cy = y1[n_idxs] + n_h / 2.0
+		
+		# normalized x, y distance
+		x_dist = torch.sub(n_cx, c_cx)
+		y_dist = torch.sub(n_cy, c_cy)
+		l2_dist = torch.div(torch.sqrt(x_dist ** 2 + y_dist ** 2), c_scale)
+		x_dist /= c_scale
+		y_dist /= c_scale
+
+		# scale difference
+		log2 = torch.log(torch.Tensor([2.0]))[0]
+		w_diff = torch.log(n_w / c_w) / log2
+		h_diff = torch.log(n_h / c_h) / log2
+		aspect_diff = (torch.log(n_w / n_h) - torch.log(c_w / c_h)) / log2
+
+		# concatenating all properties
+		pairFeatures = torch.cat((cScores, nScores, ious, x_dist, y_dist, l2_dist, w_diff, h_diff, aspect_diff), 1)
+
+		return pairFeatures
 
 	@staticmethod
 	def intersection(boxes1, boxes2):
@@ -147,21 +289,3 @@ class GNet(nn.Module):
 		area = np.multiply(width, height)
 
 		return (x1, y1, width, height, x2, y2, area)
-
-	def generatePairwiseFeatures(self):
-		"""
-			Function to compute pairwise features for detections
-		"""
-		pass
-
-	def multiClassNMS(self):
-		"""
-			Function to do multiclass NMS during 'training'
-		"""
-		pass
-
-	def findNeighbours(self):
-		"""
-			Function to compute neightbours of every detection
-		"""
-		pass

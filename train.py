@@ -27,7 +27,7 @@ def main():
     ## testing box-feature extraction functions
     net = GNet(numClasses=70, numBlocks=1)
     for i, batch in enumerate(trainLoader):
-        net.forward(data=batch)
+        net(data=batch)
         break
 
     ## begining training
