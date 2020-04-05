@@ -30,6 +30,8 @@ def main():
         net(data=batch)
         break
 
+    print (net)
+
     ## begining training
     # for i in range(num_epochs):
         # call training function

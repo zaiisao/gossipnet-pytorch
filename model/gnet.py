@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from utils import xavierInitialization
+
 class Block(nn.Module):
 	"""
 		Single 'block' architecture
@@ -67,6 +69,11 @@ class Block(nn.Module):
 		
 		cFeats = block_fc1_feats[cIdxs]
 		nFeats = block_fc1_neighbor_feats[nIdxs]
+
+		# zeroing out neighbour features where cIdxs = nIdxs
+		isIdRow = torch.eq(cIdxs, nIdxs)
+		zeros = torch.zeros(nFeats.shape, dtype=nFeats.dtype)
+		nFeats = torch.where(isIdRow.reshape(-1, 1), zeros, nFeats)
 
 		combinedFeatures = torch.cat((pairFeatures, cFeats, nFeats), 1)
 
@@ -131,6 +138,7 @@ class GNet(nn.Module):
 		self.classWeights = classWeights
 		if self.classWeights is None:
 			self.classWeights = torch.ones(numClasses + 1, dtype=torch.float32)
+		self.normalizeLoss = False
 
 		# FC layers to generate pairwise features
 		self.pwfeatRawInput = 9
@@ -165,16 +173,20 @@ class GNet(nn.Module):
 									nn.Linear(self.shortcutDim, 1, bias=True),
 								)
 
+		# initializing weights and bias of all linear layers
+		self.weightInitMethod = 'xavier'
+		self.initializeParameters(method=self.weightInitMethod)
+
 	def forward(self, data):
 		"""
-		
+			Main computation
 		"""
 		# since batch size will always remain as 1
 		data = data[0]
 
 		# 15000 boxes are too much for now - reducing - change later
-		no_detections = 1000
-
+		no_detections = 600
+		
 		detScores = data['scores'][:no_detections]
 		dtBoxes = data['detections'][:no_detections]
 		gtBoxes = data['gt_boxes']		
@@ -217,15 +229,39 @@ class GNet(nn.Module):
 		
 		# predicting new scores
 		objectnessScores = self.predictObjectnessScores(detFeatures)
+		objectnessScores = objectnessScores.reshape(-1)
 
 		### label matching for training
 		# original implementation works on COCO dataset and has 'gt_crowd' detections
 		# 'gt_crowd' detections are handled in a different way - making the logic complicated
 		# since we are using VRD (and VG later) datasets, our logic doesn't have to be complicated
-		labels, dt_gt_matching = self.dtGtMatching(dt_gt_iou, objectnessScores)
+		# labels, dt_gt_matching = self.dtGtMatching(dt_gt_iou, objectnessScores)
+		labels, _ = self.dtGtMatching(dt_gt_iou, objectnessScores)
 
-		p
-		
+		### computing sample losses
+		# equivalent 'tf.nn.sigmoid_cross_entropy_with_logits' -> 'torch.nn.BCEWithLogitsLoss'
+		sampleLossFunction = nn.BCEWithLogitsLoss(weight=None, reduction='none')
+		sampleLosses = sampleLossFunction(objectnessScores, labels)
+
+		loss = None
+		if self.normalizeLoss:
+			loss = torch.mean(sampleLosses)
+		else:
+			loss = torch.sum(sampleLosses)
+
+		return loss
+
+	def initializeParameters(self, method='xavier'):
+		"""
+			Initializing weights and bias of all the FC layer
+		"""
+		if method == 'xavier':
+			initializationMethod = xavierInitialization
+		else:
+			raise Exception("Need to implement other initialization methods")
+
+		# initializing all the layers
+		initializationMethod(self.pwfeat_gen_layers)
 
 	@staticmethod
 	def dtGtMatching(dt_gt_iou, objectnessScores, iouThresh=0.5):
@@ -250,7 +286,7 @@ class GNet(nn.Module):
 		# each gt need to be matched exactly once
 		isGtMatched = torch.zeros(numGts, dtype=torch.int32)
 
-		labels = torch.zeros(numDts, dtype=torch.int32)
+		labels = torch.zeros(numDts, dtype=torch.float32)
 		dt_gt_matching = torch.zeros(numDts, dtype=torch.int32)
 		dt_gt_matching.fill_(-1)
 
@@ -274,7 +310,7 @@ class GNet(nn.Module):
 
 			if (match > -1):
 				isGtMatched[match] = 1
-				labels[dtIndex] = 1
+				labels[dtIndex] = 1.
 				dt_gt_matching[dtIndex] = match
 
 		return (labels, dt_gt_matching)
