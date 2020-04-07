@@ -59,6 +59,9 @@ class Block(nn.Module):
 						)
 		self.outputReLU = nn.ReLU(inplace=True)
 
+		self.weightInitMethod = 'xavier'
+		self.initializeParameters(method=self.weightInitMethod)
+
 	def forward(self, detFeatures, cIdxs, nIdxs, pairFeatures):
 		"""
 			Input
@@ -72,7 +75,10 @@ class Block(nn.Module):
 
 		# zeroing out neighbour features where cIdxs = nIdxs
 		isIdRow = torch.eq(cIdxs, nIdxs)
-		zeros = torch.zeros(nFeats.shape, dtype=nFeats.dtype)
+		# zeros = torch.zeros(nFeats.shape, dtype=nFeats.dtype)
+		# much faster - https://discuss.pytorch.org/t/creating-tensors-on-gpu-directly/2714
+		zeros = torch.cuda.FloatTensor(nFeats.shape).fill_(0)
+
 		nFeats = torch.where(isIdRow.reshape(-1, 1), zeros, nFeats)
 
 		combinedFeatures = torch.cat((pairFeatures, cFeats, nFeats), 1)
@@ -118,12 +124,27 @@ class Block(nn.Module):
 
 		return outFeatures
 
+	def initializeParameters(self, method='xavier'):
+		"""
+			Initializing weights and bias of all the FC layer
+		"""
+		if method == 'xavier':
+			initializationMethod = xavierInitialization
+		else:
+			raise Exception("Need to implement other initialization methods")
+
+		# initializing all the layers
+		self.fc1.apply(initializationMethod)
+		self.block_pwfeat_fc_layers.apply(initializationMethod)
+		self.block_pwfeat_postmax_fc_layers.apply(initializationMethod)
+		self.outputFC.apply(initializationMethod)
+
 
 class GNet(nn.Module):
 	"""
 		'GossipNet' architecture
 	"""
-	def __init__(self, numClasses, numBlocks, classWeights=None):
+	def __init__(self, numBlocks):
 		"""
 			Initializing the gossipnet architecture
 			Input:
@@ -133,12 +154,7 @@ class GNet(nn.Module):
 		"""
 		super(GNet, self).__init__()
 
-		self.numClasses = numClasses
-		self.neighbourIoU = 0.3	
-		self.classWeights = classWeights
-		if self.classWeights is None:
-			self.classWeights = torch.ones(numClasses + 1, dtype=torch.float32)
-		self.normalizeLoss = False
+		self.neighbourIoU = 0.2	
 
 		# FC layers to generate pairwise features
 		self.pwfeatRawInput = 9
@@ -168,12 +184,22 @@ class GNet(nn.Module):
 		self.singleBlock = Block()
 		self.blockLayers = nn.ModuleList([copy.deepcopy(self.singleBlock) for _ in range(self.numBlocks)])
 
+		# 'fc' layers before generating the updated score
+		self.num_score_fc = 3
+		self.score_fc_layers = []
+		for _ in range(self.num_score_fc):
+			self.score_fc_layers.append(nn.Sequential(
+											nn.Linear(self.shortcutDim, self.shortcutDim, bias=True),
+											nn.ReLU(inplace=True)
+										))
+		self.score_fc_layers = nn.ModuleList(self.score_fc_layers)
+
 		# new scores - a single (1) score per detection
 		self.predictObjectnessScores = nn.Sequential(
 									nn.Linear(self.shortcutDim, 1, bias=True),
 								)
 
-		# initializing weights and bias of all linear layers
+		# initializing weights and bias of all layers
 		self.weightInitMethod = 'xavier'
 		self.initializeParameters(method=self.weightInitMethod)
 
@@ -185,15 +211,15 @@ class GNet(nn.Module):
 		data = data[0]
 
 		# 15000 boxes are too much for now - reducing - change later
-		no_detections = 600
+		no_detections = 500
 		
 		detScores = data['scores'][:no_detections]
 		dtBoxes = data['detections'][:no_detections]
 		gtBoxes = data['gt_boxes']		
-		
-		detScores = torch.from_numpy(detScores)
-		dtBoxes = torch.from_numpy(dtBoxes)
-		gtBoxes = torch.from_numpy(gtBoxes)
+
+		detScores = torch.from_numpy(detScores).type(torch.cuda.FloatTensor)
+		dtBoxes = torch.from_numpy(dtBoxes).cuda()
+		gtBoxes = torch.from_numpy(gtBoxes).cuda()
 
 		# getting box information from detections i.e. (x1, y1, w, h, x2, y2, area)
 		dtBoxesData = self.getBoxData(dtBoxes)
@@ -205,7 +231,7 @@ class GNet(nn.Module):
 		dt_dt_iou = self.iou(dtBoxesData, dtBoxesData)
 
 		# we don't have classes for detections - just the gt_classes
-		# so doing single class nms - discuss on this!
+		# so doing single class nms - discuss on this! - okay!
 
 		# finding neighbours of all detections - torch.nonzero() equivalent of tf.where(condition)
 		neighbourPairIds = torch.nonzero(torch.ge(dt_dt_iou, self.neighbourIoU))
@@ -214,19 +240,24 @@ class GNet(nn.Module):
 
 		# generating pairwise features
 		pairFeatures = self.generatePairwiseFeatures(pair_c_idxs, pair_n_idxs, neighbourPairIds, detScores, dt_dt_iou, dtBoxesData)
-		pairFeatures = pairFeatures.float() # can we fix this?
 		pairFeatures = self.pairwiseFeaturesFC(pairFeatures)
-		
+
 		numDets = dtBoxes.shape[0]
 
 		# input to the first block must be all zero's
-		startingFeatures = torch.zeros([numDets, self.shortcutDim], dtype=torch.float32)
-		
+		# much faster - https://discuss.pytorch.org/t/creating-tensors-on-gpu-directly/2714
+		# startingFeatures = torch.zeros([numDets, self.shortcutDim], dtype=torch.float32).cuda()
+		startingFeatures = torch.cuda.FloatTensor(numDets, self.shortcutDim).fill_(0)
+
 		# getting refined features
 		detFeatures = startingFeatures
 		for layer in self.blockLayers:
 			detFeatures = layer(detFeatures, pair_c_idxs, pair_n_idxs, pairFeatures)
-		
+
+		# passing through scoring FC layers
+		for layer in self.score_fc_layers:
+			detFeatures = layer(detFeatures)
+
 		# predicting new scores
 		objectnessScores = self.predictObjectnessScores(detFeatures)
 		objectnessScores = objectnessScores.reshape(-1)
@@ -243,13 +274,10 @@ class GNet(nn.Module):
 		sampleLossFunction = nn.BCEWithLogitsLoss(weight=None, reduction='none')
 		sampleLosses = sampleLossFunction(objectnessScores, labels)
 
-		loss = None
-		if self.normalizeLoss:
-			loss = torch.mean(sampleLosses)
-		else:
-			loss = torch.sum(sampleLosses)
+		lossNormalized = torch.mean(sampleLosses)
+		lossUnnormalized = torch.sum(sampleLosses)
 
-		return loss
+		return (lossNormalized, lossUnnormalized)
 
 	def initializeParameters(self, method='xavier'):
 		"""
@@ -261,7 +289,9 @@ class GNet(nn.Module):
 			raise Exception("Need to implement other initialization methods")
 
 		# initializing all the layers
-		initializationMethod(self.pwfeat_gen_layers)
+		self.pwfeat_gen_layers.apply(initializationMethod)
+		self.score_fc_layers.apply(initializationMethod)
+		self.predictObjectnessScores.apply(initializationMethod)
 
 	@staticmethod
 	def dtGtMatching(dt_gt_iou, objectnessScores, iouThresh=0.5):
@@ -284,11 +314,14 @@ class GNet(nn.Module):
 		numGts = dt_gt_iou.shape[1]
 
 		# each gt need to be matched exactly once
-		isGtMatched = torch.zeros(numGts, dtype=torch.int32)
+		# isGtMatched = torch.zeros(numGts, dtype=torch.int32)
+		isGtMatched = torch.cuda.IntTensor(numGts).fill_(0)
 
-		labels = torch.zeros(numDts, dtype=torch.float32)
-		dt_gt_matching = torch.zeros(numDts, dtype=torch.int32)
-		dt_gt_matching.fill_(-1)
+		# labels = torch.zeros(numDts, dtype=torch.float32)
+		labels = torch.cuda.FloatTensor(numDts).fill_(0)
+		# dt_gt_matching = torch.zeros(numDts, dtype=torch.int32)
+		# dt_gt_matching.fill_(-1)
+		dt_gt_matching = torch.cuda.IntTensor(numDts).fill_(-1)
 
 		for i in range(numDts):
 			dtIndex = sortedIndexs[i]
@@ -390,8 +423,8 @@ class GNet(nn.Module):
 		x2 = torch.min(boxes1_x2, boxes2_x2)
 		y2 = torch.min(boxes1_y2, boxes2_y2)
 
-		width = torch.max(torch.DoubleTensor([0.0]), torch.sub(x2, x1))
-		height = torch.max(torch.DoubleTensor([0.0]), torch.sub(y2, y1))
+		width = torch.max(torch.cuda.FloatTensor([0.0]), torch.sub(x2, x1))
+		height = torch.max(torch.cuda.FloatTensor([0.0]), torch.sub(y2, y1))
 
 		intersection = torch.mul(width, height)
 
@@ -416,17 +449,17 @@ class GNet(nn.Module):
 		"""
 			Getting box information (x1, y1, w, h, x2, y2, area) from (x1, y1, x2, y2)
 		"""
-		x1 = boxes[:, 0].reshape(-1, 1)
-		y1 = boxes[:, 1].reshape(-1, 1)
-		x2 = boxes[:, 2].reshape(-1, 1)
-		y2 = boxes[:, 3].reshape(-1, 1)
-		
+		x1 = boxes[:, 0].reshape(-1, 1).type(torch.cuda.FloatTensor)
+		y1 = boxes[:, 1].reshape(-1, 1).type(torch.cuda.FloatTensor)
+		x2 = boxes[:, 2].reshape(-1, 1).type(torch.cuda.FloatTensor)
+		y2 = boxes[:, 3].reshape(-1, 1).type(torch.cuda.FloatTensor)
+
 		width = x2 - x1
 		height = y2 - y1
-		
+
 		# find a torch equivalent or convert to numpy and then check
 		# assert np.all(width > 0) and np.all(height > 0), "rpn boxes are incorrect - height or width is negative"
 
-		area = np.multiply(width, height)
+		area = torch.mul(width, height)
 
 		return (x1, y1, width, height, x2, y2, area)
