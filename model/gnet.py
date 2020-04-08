@@ -154,7 +154,7 @@ class GNet(nn.Module):
 		"""
 		super(GNet, self).__init__()
 
-		self.neighbourIoU = 0.2	
+		self.neighbourIoU = 0.3
 
 		# FC layers to generate pairwise features
 		self.pwfeatRawInput = 9
@@ -211,7 +211,7 @@ class GNet(nn.Module):
 		data = data[0]
 
 		# 15000 boxes are too much for now - reducing - change later
-		no_detections = 500
+		no_detections = 600
 		
 		detScores = data['scores'][:no_detections]
 		dtBoxes = data['detections'][:no_detections]
@@ -220,6 +220,8 @@ class GNet(nn.Module):
 		detScores = torch.from_numpy(detScores).type(torch.cuda.FloatTensor)
 		dtBoxes = torch.from_numpy(dtBoxes).cuda()
 		gtBoxes = torch.from_numpy(gtBoxes).cuda()
+
+		# print (detScores)
 
 		# getting box information from detections i.e. (x1, y1, w, h, x2, y2, area)
 		dtBoxesData = self.getBoxData(dtBoxes)
@@ -237,6 +239,10 @@ class GNet(nn.Module):
 		neighbourPairIds = torch.nonzero(torch.ge(dt_dt_iou, self.neighbourIoU))
 		pair_c_idxs = neighbourPairIds[:, 0]
 		pair_n_idxs = neighbourPairIds[:, 1]
+
+		# model-check code
+		self.neighbourPairIds = neighbourPairIds
+		# print ("Number of neighbours being processed: {}".format(len(neighbourPairIds)))
 
 		# generating pairwise features
 		pairFeatures = self.generatePairwiseFeatures(pair_c_idxs, pair_n_idxs, neighbourPairIds, detScores, dt_dt_iou, dtBoxesData)
@@ -262,12 +268,16 @@ class GNet(nn.Module):
 		objectnessScores = self.predictObjectnessScores(detFeatures)
 		objectnessScores = objectnessScores.reshape(-1)
 
+		# print (objectnessScores)
+
 		### label matching for training
 		# original implementation works on COCO dataset and has 'gt_crowd' detections
 		# 'gt_crowd' detections are handled in a different way - making the logic complicated
 		# since we are using VRD (and VG later) datasets, our logic doesn't have to be complicated
 		# labels, dt_gt_matching = self.dtGtMatching(dt_gt_iou, objectnessScores)
 		labels, _ = self.dtGtMatching(dt_gt_iou, objectnessScores)
+
+		# print (labels)
 
 		### computing sample losses
 		# equivalent 'tf.nn.sigmoid_cross_entropy_with_logits' -> 'torch.nn.BCEWithLogitsLoss'
@@ -345,6 +355,8 @@ class GNet(nn.Module):
 				isGtMatched[match] = 1
 				labels[dtIndex] = 1.
 				dt_gt_matching[dtIndex] = match
+
+		# print (isGtMatched)
 
 		return (labels, dt_gt_matching)
 

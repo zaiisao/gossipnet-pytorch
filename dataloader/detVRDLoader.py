@@ -5,9 +5,9 @@ import numpy as np
 
 import torch.utils.data as data
 
-class detLoader(data.Dataset):
+class detVRDLoader(data.Dataset):
     """
-        Loading detections for 'GossipNet'
+        Loading detections for 'GossipNet' specfic for VRD dataset
 
         - this loader should mimic what 'nms' gets as input in 'fnet'
         - for now will limit it to just the detections TODO: add image features later
