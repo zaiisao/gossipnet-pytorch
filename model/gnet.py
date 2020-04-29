@@ -1,4 +1,5 @@
 import copy
+import time as timer
 
 import numpy as np
 
@@ -19,8 +20,8 @@ class Block(nn.Module):
 		super(Block, self).__init__()
 
 		# TODO: move architecture specific dimensions to a central configuration file
-		self.shortcutDim = 128
-		self.reducedDim = 32
+		self.shortcutDim = 128 # 32
+		self.reducedDim = 32 # 16
 
 		# FC layer for input detection - input will be the dimensions for each box
 		self.fc1 = nn.Sequential(
@@ -30,10 +31,11 @@ class Block(nn.Module):
 
 		# FC layers for pairwise features
 		self.num_block_pwfeat_fc = 2 # keep it >=1
-		self.blockInnerDim = 2 * 32 # why is it defined like this?
+		self.blockInnerDim =  2 * 32 # 2 * 16 # why is it defined like this?
 		self.block_pwfeat_fc_layers = []
 		self.block_pwfeat_fc_layers.append(nn.Sequential(
 											nn.Linear(3*32, self.blockInnerDim, bias=True),
+											# nn.Linear(3*16, self.blockInnerDim, bias=True),
 											nn.ReLU(inplace=True)
 										))
 		for _ in range(self.num_block_pwfeat_fc-1):
@@ -154,12 +156,12 @@ class GNet(nn.Module):
 		"""
 		super(GNet, self).__init__()
 
-		self.neighbourIoU = 0.3
+		self.neighbourIoU = 0.2
 
 		# FC layers to generate pairwise features
 		self.pwfeatRawInput = 9
-		self.pwfeatInnerDim = 256
-		self.pwfeatOutDim = 32
+		self.pwfeatInnerDim = 256 # 32
+		self.pwfeatOutDim = 32 # 16
 		self.num_pwfeat_fc = 3 # keep it >= 3 for now!
 		# TODO: weight and bias initialization
 		self.pwfeat_gen_layers = []
@@ -179,10 +181,9 @@ class GNet(nn.Module):
 		self.pwfeat_gen_layers = nn.ModuleList(self.pwfeat_gen_layers)
 
 		# 'block' layers
-		self.shortcutDim = 128
+		self.shortcutDim = 128 # 32
 		self.numBlocks = numBlocks
-		self.singleBlock = Block()
-		self.blockLayers = nn.ModuleList([copy.deepcopy(self.singleBlock) for _ in range(self.numBlocks)])
+		self.blockLayers = nn.ModuleList([Block() for _ in range(self.numBlocks)])
 
 		# 'fc' layers before generating the updated score
 		self.num_score_fc = 3
@@ -211,7 +212,7 @@ class GNet(nn.Module):
 		data = data[0]
 
 		# 15000 boxes are too much for now - reducing - change later
-		no_detections = 600
+		no_detections = 300
 		
 		detScores = data['scores'][:no_detections]
 		dtBoxes = data['detections'][:no_detections]
@@ -221,26 +222,52 @@ class GNet(nn.Module):
 		dtBoxes = torch.from_numpy(dtBoxes).cuda()
 		gtBoxes = torch.from_numpy(gtBoxes).cuda()
 
-		# print (detScores)
-
 		# getting box information from detections i.e. (x1, y1, w, h, x2, y2, area)
 		dtBoxesData = self.getBoxData(dtBoxes)
 		gtBoxesData = self.getBoxData(gtBoxes)
 
-		# computing IoU between detections and ground truth
-		dt_gt_iou = self.iou(dtBoxesData, gtBoxesData)
 		# computing IoU between detections and detections
 		dt_dt_iou = self.iou(dtBoxesData, dtBoxesData)
 
 		# we don't have classes for detections - just the gt_classes
 		# so doing single class nms - discuss on this! - okay!
 
+		# config 0.
 		# finding neighbours of all detections - torch.nonzero() equivalent of tf.where(condition)
 		neighbourPairIds = torch.nonzero(torch.ge(dt_dt_iou, self.neighbourIoU))
+
+
+
+		# code to get number of neighbour pairs
+		# self.no_neighbour = len(neighbourPairIds)
+
+
+
+		# print ("No detections: {}, no pairs: {}".format(dtBoxes.shape[0], neighbourPairIds.shape[0]))
+
+		# config 1. limiting to top 50 IoU matches - nieghbourIoU not used
+		# args = torch.argsort(dt_dt_iou, descending=True)
+		# neighbourPairIds = torch.nonzero(torch.le(args, 49))
+
+		# config 2. using clustering centers
+		# same as the original
+		# neighbourPairIds = torch.nonzero(torch.ge(dt_dt_iou, self.neighbourIoU))
+
+		# config 3. using neighbours from the cluster centers
+		# masking non-cluster detections, IoU = 10
+		# cluster_labels = torch.from_numpy(data['cluster_labels']).cuda()
+		# mask = torch.eq(cluster_labels, cluster_labels.view(-1, 1))
+		# dt_dt_iou[mask] = 10
+		# # sorting so that non-cluster detections are at the end 
+		# # masking again so that torch
+		# args = torch.argsort(dt_dt_iou, descending=False)
+		# args[mask] = 100000 
+		# neighbourPairIds = torch.nonzero(torch.le(args, 49))
+
 		pair_c_idxs = neighbourPairIds[:, 0]
 		pair_n_idxs = neighbourPairIds[:, 1]
 
-		# model-check code
+		# model-check code - used in train.py
 		self.neighbourPairIds = neighbourPairIds
 		# print ("Number of neighbours being processed: {}".format(len(neighbourPairIds)))
 
@@ -268,16 +295,20 @@ class GNet(nn.Module):
 		objectnessScores = self.predictObjectnessScores(detFeatures)
 		objectnessScores = objectnessScores.reshape(-1)
 
-		# print (objectnessScores)
+		# test mode should return from here
+		return objectnessScores
+
+		# computing IoU between detections and ground truth
+		dt_gt_iou = self.iou(dtBoxesData, gtBoxesData)
 
 		### label matching for training
 		# original implementation works on COCO dataset and has 'gt_crowd' detections
 		# 'gt_crowd' detections are handled in a different way - making the logic complicated
 		# since we are using VRD (and VG later) datasets, our logic doesn't have to be complicated
 		# labels, dt_gt_matching = self.dtGtMatching(dt_gt_iou, objectnessScores)
+		# start = timer.time()
 		labels, _ = self.dtGtMatching(dt_gt_iou, objectnessScores)
-
-		# print (labels)
+		# print (timer.time() - start)
 
 		### computing sample losses
 		# equivalent 'tf.nn.sigmoid_cross_entropy_with_logits' -> 'torch.nn.BCEWithLogitsLoss'

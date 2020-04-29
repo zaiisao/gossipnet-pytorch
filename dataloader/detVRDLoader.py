@@ -34,8 +34,19 @@ class detVRDLoader(data.Dataset):
 
         # convert from list ot numpy arrays
         data['detections'] = np.array(data['detections'])
-        data['gt_boxes'] = np.array(data['gt_boxes'])
         data['scores'] = np.array(data['scores'])
+
+        # need to pick cluster centers and labels
+        # config 2.
+        # data['detections'] = np.array(data['cluster_centers'])
+        # data['scores'] = np.array(data['cluster_scores'])
+
+        # config 3. just add this
+        # data['cluster_labels'] = np.array(data['cluster_labels'])
+
+        data['gt_boxes'] = np.array(data['gt_boxes'])
+        
+        data['file_name'] = selected_file
 
         return data
 

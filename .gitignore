@@ -1,2 +1,5 @@
 # don't track the training data
 data/
+trained_models/
+setting1-0.2/
+setting2-0.2/
