@@ -15,7 +15,11 @@ def main():
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("data_dir", help="data directory", type=str, default=None)
+    parser.add_argument("--data_dir", type=str, default=None)
+    parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--lr", type=float, default=0.0001)
+    parser.add_argument("--epochs", type=int, default=15)
+    parser.add_argument("--no_detections", type=int, default=9999999)
     args = parser.parse_args()    
 
     print ("Loading VRD training dataset, "),
@@ -26,7 +30,7 @@ def main():
     print ("{} files loaded".format(len(trainData)))
 
     trainLoader = torch.utils.data.DataLoader(trainData, 
-                                                batch_size=1, 
+                                                batch_size=args.batch_size, 
                                                 shuffle=True,
                                                 #collate_fn=detVRDLoader.collate)
                                                 collate_fn=BeatLoader.collate)
@@ -60,7 +64,8 @@ def main():
     # print ("Print total parameters: {}".format(pytorch_total))
 
     # learning rate
-    learning_rate = 0.0001
+    # learning_rate = 0.0001
+    learning_rate = args.lr
 
     # weight regualarization not added
     # optimizer
@@ -69,7 +74,8 @@ def main():
     # for param_group in optimizer.param_groups:
     #     print (param_group['lr'])
     
-    num_epochs = 15 # TODO: move to a configuration file
+    #num_epochs = 15 # TODO: move to a configuration file
+    num_epochs = args.epochs
     # starting_epoch = 0
 
     # resuming training # TODO: move to cmd arguments
@@ -173,6 +179,13 @@ def main():
 
 # We use the result of the matching as labels for the classifier: successfully matched detections are positive training
 # examples, while unmatched detections are negative training  examples for a standard binary loss.
+
+#  Typically all detections that are used for training of a classifier have a label
+# associated as they are fed into the network. **In this case** the network has access to detections and object annotations
+# and the matching layer generates labels, that depend on the predictions of the network. Note how this class/label assignment
+# directly encourages the rescoring behaviour that we wish to achieve.
+
+#As a result, we only match detections to objects of the same class, but the classification problem remains binary and the above loss still applies
  
     for epoch in range(starting_epoch, starting_epoch + num_epochs):
         # learning rate update after a set number of epochs
@@ -183,11 +196,11 @@ def main():
                 param_group['lr'] = learning_rate
 
         # call training function
-        train(trainLoader, net, optimizer, epoch)
+        train(trainLoader, net, optimizer, epoch, args)
 
         #print (test-run)
 
-def train(loader, network, optimizer, epoch):
+def train(loader, network, optimizer, epoch, args):
     """
         A single training epoch over the entire dataset    
     """
@@ -204,7 +217,7 @@ def train(loader, network, optimizer, epoch):
 
         start1 = timer.time()
         # computing forward pass
-        lossNormalized, lossUnnormalized = network(data=batch)
+        lossNormalized, lossUnnormalized = network(data=batch, no_detections=args.no_detections)
         #MJ: within network:  lossNormalized = torch.mean(sampleLosses)
 		#MJ:                  lossUnnormalized = torch.sum(sampleLosses)
         end1 = timer.time()

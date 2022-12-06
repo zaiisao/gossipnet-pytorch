@@ -169,7 +169,7 @@ class GNet(nn.Module):
 										nn.Linear(self.pwfeatRawInput, self.pwfeatInnerDim, bias=True),
 										nn.ReLU(inplace=True)
 									))
-		for _ in range(self.num_pwfeat_fc-2):
+		for _ in range(self.num_pwfeat_fc-2): # =1
 			self.pwfeat_gen_layers.append(nn.Sequential(
 											nn.Linear(self.pwfeatInnerDim, self.pwfeatInnerDim, bias=True),
 											nn.ReLU(inplace=True)
@@ -204,7 +204,7 @@ class GNet(nn.Module):
 		self.weightInitMethod = 'xavier'
 		self.initializeParameters(method=self.weightInitMethod)
 
-	def forward(self, data):
+	def forward(self, data, no_detections=300): #MJ: data is a batch with batch_size =1
 		"""
 			Main computation
 		"""
@@ -212,7 +212,6 @@ class GNet(nn.Module):
 		data = data[0]
 
 		# 15000 boxes are too much for now - reducing - change later
-		no_detections = 300
 		
 		detScores = data['scores'][:no_detections]
 		dtBoxes = data['detections'][:no_detections]
@@ -222,7 +221,7 @@ class GNet(nn.Module):
 		dtBoxes = torch.from_numpy(dtBoxes).cuda()
 		gtBoxes = torch.from_numpy(gtBoxes).cuda()
 
-		# getting box information from detections i.e. (x1, y1, w, h, x2, y2, area)
+		# getting box information (x1, y1, w, h, x2, y2, area) from (x1,y1,x2,y2)
 		dtBoxesData = self.getBoxData(dtBoxes)
 		gtBoxesData = self.getBoxData(gtBoxes)
 
@@ -282,9 +281,15 @@ class GNet(nn.Module):
 		# startingFeatures = torch.zeros([numDets, self.shortcutDim], dtype=torch.float32).cuda()
 		startingFeatures = torch.cuda.FloatTensor(numDets, self.shortcutDim).fill_(0)
 
-		# getting refined features
+		# getting refined features:
+  
+    #MJ: 
+    # Detection features. The blocks of our network take the detection feature vector of each detection as input and outputs
+	# an updated vector (see high-level illustration in figure 2). Outputs from one block are input to the next one. The
+	# values inside this c = 128 dimensional feature vector are learned implicitly during the training. 
+	# The output of the last block is used to generate the new detection score for each detection
 		detFeatures = startingFeatures
-		for layer in self.blockLayers:
+		for layer in self.blockLayers:  # MJ: self.blockLayers = nn.ModuleList([Block() for _ in range(self.numBlocks)])
 			detFeatures = layer(detFeatures, pair_c_idxs, pair_n_idxs, pairFeatures)
 
 		# passing through scoring FC layers
@@ -293,6 +298,12 @@ class GNet(nn.Module):
 
 		# predicting new scores
 		objectnessScores = self.predictObjectnessScores(detFeatures)
+  
+  #MJ: # new scores - a single (1) score per detection
+		# self.predictObjectnessScores = nn.Sequential(
+		# 							nn.Linear(self.shortcutDim, 1, bias=True),
+		# 						)
+  
 		objectnessScores = objectnessScores.reshape(-1)
 
 		# # test mode should return from here
@@ -307,12 +318,17 @@ class GNet(nn.Module):
 		# since we are using VRD (and VG later) datasets, our logic doesn't have to be complicated
 		# labels, dt_gt_matching = self.dtGtMatching(dt_gt_iou, objectnessScores)
 		# start = timer.time()
-		labels, _ = self.dtGtMatching(dt_gt_iou, objectnessScores)
+		labels, _ = self.dtGtMatching(dt_gt_iou, objectnessScores) #
+        # The output of self.dtGtMatching(dt_gt_iou, objectnessScores):
+        #   labels: Boolean tensor representing which detections/samples are to be treated as true positives
+		#   dt_gt_matching: which detection gets matched to which gt
 		# print (timer.time() - start)
 
 		### computing sample losses
 		# equivalent 'tf.nn.sigmoid_cross_entropy_with_logits' -> 'torch.nn.BCEWithLogitsLoss'
+  
 		sampleLossFunction = nn.BCEWithLogitsLoss(weight=None, reduction='none')
+  
 		sampleLosses = sampleLossFunction(objectnessScores, labels)
 
 		lossNormalized = torch.mean(sampleLosses)
@@ -476,21 +492,22 @@ class GNet(nn.Module):
 	@staticmethod
 	def iou(boxes1, boxes2):
 		"""
-			Compute IoU values between boxes1 and boxes2
+			Compute IoU values between boxes1 and boxes2;
+           boxes1, boxes2: (x1, y1, width, height, x2, y2, area)
 		"""
-		area1 = boxes1[6].reshape(-1, 1) # area1 set in rows
-		area2 = boxes2[6].reshape(1, -1) # area2 set in columns
+		area1 = boxes1[6].reshape(-1, 1) # area1 set in rows: 1xN
+		area2 = boxes2[6].reshape(1, -1) # area2 set in columns: Mx1
 
 		intersection = 	GNet.intersection(boxes1, boxes2)
 		union = torch.sub(torch.add(area1, area2), intersection)
-		iou = torch.div(intersection, union)
+		iou = torch.div(intersection, union) #MJ: iou = NxM overlap matrix between detectors and gt boxes
 
 		return iou
 
 	@staticmethod
 	def getBoxData(boxes):
 		"""
-			Getting box information (x1, y1, w, h, x2, y2, area) from (x1, y1, x2, y2)
+			Getting box information (x1, y1, w, h, x2, y2, area) from the original format (x1, y1, x2, y2)
 		"""
 		x1 = boxes[:, 0].reshape(-1, 1).type(torch.cuda.FloatTensor)
 		y1 = boxes[:, 1].reshape(-1, 1).type(torch.cuda.FloatTensor)

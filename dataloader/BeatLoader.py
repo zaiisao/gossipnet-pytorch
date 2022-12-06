@@ -93,7 +93,7 @@ class BeatLoader(data.Dataset):
     def collate(items):
         """
             Will specify how the batch items fetched by the data loader are grouped together
-            For our case custom writing it for batch_size - 1
+            For our case custom writing it for batch_size =1
         """
         # return batch items as a list
         return items
