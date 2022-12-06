@@ -112,7 +112,7 @@ def main():
         # call training function
         train(trainLoader, net, optimizer, epoch)
 
-        print (test-run)
+        #print (test-run)
 
 def train(loader, network, optimizer, epoch):
     """
@@ -132,6 +132,8 @@ def train(loader, network, optimizer, epoch):
         start1 = timer.time()
         # computing forward pass
         lossNormalized, lossUnnormalized = network(data=batch)
+        #MJ: within network:  lossNormalized = torch.mean(sampleLosses)
+		#MJ:                  lossUnnormalized = torch.sum(sampleLosses)
         end1 = timer.time()
 
         timeFP += (end1 - start1)
@@ -140,8 +142,11 @@ def train(loader, network, optimizer, epoch):
         start2 = timer.time()
         # propagating loss backward
         optimizer.zero_grad()
-        torch.cuda.synchronize()
+        torch.cuda.synchronize()  #MJ:  “Waits for all kernels in all streams on a CUDA device to complete.
+                                  # https://discuss.pytorch.org/t/how-does-torch-cuda-synchronize-behave/147049
+        
         lossUnnormalized.backward()
+        
         torch.cuda.synchronize()
         optimizer.step()
         end2 = timer.time()
@@ -159,7 +164,7 @@ def train(loader, network, optimizer, epoch):
                 'epoch': str(epoch) + '_' + str(i),
                 'model_state_dict': network.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                'lossNormalized': lossNormalized,
+                'lossNormalized': lossNormalized,   #MJ: lossNormalized was computed to be simply displayed
                 'lossUnnormalized': lossUnnormalized
                 }, "./trained_models/state_" + str(epoch) + "_" + str(i) + ".pth")
             print ("completed")
