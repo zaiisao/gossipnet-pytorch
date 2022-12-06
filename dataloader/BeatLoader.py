@@ -22,72 +22,78 @@ class BeatLoader(data.Dataset):
 
         # reading in the images present
         self.files = os.listdir(self.data_dir)
+        self.data = []
+        
+        self.load()
 
     def __getitem__(self, index):
         """
             Returning annotations based on a index
         """
-        selected_audio_file = self.files[index]
-        selected_file_name = selected_audio_file.replace('.wav', '.txt')
 
-        # # read in the json file - detections and ground truth
-        # data = json.load(open(os.path.join(self.data_dir, selected_file)))
-
-        # # convert from list ot numpy arrays
-        # data['detections'] = np.array(data['detections'])
-        # data['scores'] = np.array(data['scores'])
-
-        # # need to pick cluster centers and labels
-        # # config 2.
-        # # data['detections'] = np.array(data['cluster_centers'])
-        # # data['scores'] = np.array(data['cluster_scores'])
-
-        # # config 3. just add this
-        # # data['cluster_labels'] = np.array(data['cluster_labels'])
-
-        # data['gt_boxes'] = np.array(data['gt_boxes'])
-        
-        # data['file_name'] = selected_file
-        
-        data = {}
-
-        gt_boxes = []
-        detections = []
-        scores = []
-
-        gt_file = open(os.path.join(self.data_dir, "..", "gt_intervals", selected_file_name))
-        gt_lines = gt_file.readlines()
-        gt_file.close()
-        
-        for gt_line in gt_lines:
-            gt_line = gt_line.replace('\n', '')
-            extracted_data_from_gt_line = gt_line.split(' ')
+        return self.data[index]
+    
+    def load(self):
+        for index in range(len(self.files)):
+            selected_audio_file = self.files[index]
+            selected_file_name = selected_audio_file.replace('.wav', '.txt')
             
-            gt_box = [float(item) for item in extracted_data_from_gt_line[1:]]
+            data = {}
 
-            gt_boxes.append(gt_box)
+            gt_boxes = []
+            detections = []
+            scores = []
 
-        pred_file = open(os.path.join(self.data_dir, "..", "pred_intervals", selected_file_name))
-        pred_lines = pred_file.readlines()
-        pred_file.close()
-        
-        for pred_line in pred_lines:
-            pred_line = pred_line.replace('\n', '')
-            extracted_data_from_pred_line = pred_line.split(' ')
+            gt_file = open(os.path.join(self.data_dir, "..", "gt_intervals", selected_file_name))
+            gt_lines = gt_file.readlines()
+            gt_file.close()
 
-            detection = [float(item) for item in extracted_data_from_pred_line[2:]]
-            score = float(extracted_data_from_pred_line[1])
+            num_classes = 2
             
-            detections.append(detection)
-            scores.append(score)
-            
-        data = {
-            'gt_boxes': np.array(gt_boxes),
-            'detections': np.array(detections),
-            'scores': np.array(scores),
-        }
+            for class_id in range(num_classes):
+                class_name = None
+                if class_id == 0:
+                    class_name = "downbeat"
+                elif class_id == 1:
+                    class_name = "beat"
+                else:
+                    raise NotImplementedError
 
-        return data
+                for gt_line in gt_lines:
+                    gt_line = gt_line.replace('\n', '')
+                    extracted_data_from_gt_line = gt_line.split(' ')
+
+                    if extracted_data_from_gt_line[0] != class_name:
+                        continue
+                    
+                    gt_box = [float(item) for item in extracted_data_from_gt_line[1:]]
+
+                    gt_boxes.append(gt_box)
+
+                pred_file = open(os.path.join(self.data_dir, "..", "pred_intervals", selected_file_name))
+                pred_lines = pred_file.readlines()
+                pred_file.close()
+                
+                for pred_line in pred_lines:
+                    pred_line = pred_line.replace('\n', '')
+                    extracted_data_from_pred_line = pred_line.split(' ')
+
+                    if extracted_data_from_gt_line[0] != class_name:
+                        continue
+
+                    detection = [float(item) for item in extracted_data_from_pred_line[2:]]
+                    score = float(extracted_data_from_pred_line[1])
+                    
+                    detections.append(detection)
+                    scores.append(score)
+                    
+                data = {
+                    'gt_boxes': np.array(gt_boxes),
+                    'detections': np.array(detections),
+                    'scores': np.array(scores),
+                }
+
+                self.data.append(data)
 
     @staticmethod
     def collate(items):
@@ -102,4 +108,4 @@ class BeatLoader(data.Dataset):
         """
             Returning total number of files/images whose data is available 
         """
-        return len(self.files)
+        return len(self.data)

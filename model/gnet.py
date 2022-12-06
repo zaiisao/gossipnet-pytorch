@@ -307,7 +307,8 @@ class GNet(nn.Module):
 		objectnessScores = objectnessScores.reshape(-1)
 
 		# # test mode should return from here
-		# return objectnessScores
+		if not self.training:
+			return objectnessScores
 
 		# computing IoU between detections and ground truth
 		dt_gt_iou = self.iou(dtBoxesData, gtBoxesData)
