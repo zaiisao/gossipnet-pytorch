@@ -15,7 +15,7 @@ def main():
     print ("Loading VRD training dataset, "),
     # trainData = detVRDLoader("./data/vrd/train-fnet-no12000-nms0.7/")
     # trainData = detVRDLoader("./data/vrd/train/")
-    trainData = BeatLoader("/mount/beat-tracking/gtzan/data")
+    trainData = BeatLoader("../gtzan/data")
 
     print ("{} files loaded".format(len(trainData)))
 
@@ -101,6 +101,61 @@ def main():
     #             json.dump(save, f)
 
     # begining training
+    
+    #MJ: Refer to the previous paper: https://arxiv.org/pdf/1511.06437.pdf:
+    # The gossipnet uses the same information as GreedyNMS, and does not access the image pixels directly.
+    # The required training data are only a set of object detections (before NMS), and the ground truth bounding boxes of the dataset.
+    # The main intuition behind our proposed Tyrolean network (Tnet) is that the score map of a detector
+    # together with a **map that represents the overlap between neighbouring hypotheses ** contains valuable
+    # information to perform better NMS than GreedyNMS (also see figure 1)
+    # Thus, our network is a traditional convnet but with access to two slightly unusual inputs (described below), 
+    # namely score map information and IoU maps.
+    
+    #Tnet is then responsible for interpreting the multiple score maps and the IoU layer, and make the
+    # best local decision. Our Tnet operates in a fully feed-forward convolutional manner. Each location
+    # is visited only once, and the decision is final. In other words, for each location the Tnet has to
+    # decide if a particular detection score corresponds to a correct detection or will be suppressed by a
+    # neighbouring detection in a single feed-forward path.
+    
+    # Input variants:  In the experiments in the next sections we consider different input variants. The
+    # IoU layer values can be computed over bounding boxes (regressed by the sliding window detector),
+    # or over estimated instance segments (Pinheiro et al., 2015).
+    # Similarly, for the score maps we consider different numbers of GreedyNMS thresholds, which
+    # changes the dimensionality of the input score map layer.
+    # In all cases we expect the Tnet to improve over a fixed threshold GreedyNMS by discovering patterns 
+    # in the detector score maps and IoU arrangements that enable to do adaptive NMS decision
+
+    # Training loss:  Our goal is to reduce the score of all detections that belong to the same person, except
+    # exactly one of them. To that end, we match every annotation to all detections that overlap at least
+    # 0.5 IoU and choose the maximum scoring detection among them as the one positive training sample.
+    # All other detections are negative training examples. This yields a label yp for every location p in
+    # the input grid (see previous section). Since background detections are much more frequent than true
+    # positives, it is necessary to weight the loss terms to balance the two. We use the weighted logistic
+    # loss.
+    
+    # Since we have a one-to-one correspondence between input grid cells and labels it is straight forward
+    # to train a fully convolutional network to minimize this loss.
+
+    #MJ: The current paper: 
+# Our network is capable of performing NMS without being given a set of suppression alternatives
+# to chose from and without having another final suppression step.
+
+# From this analysis we can see that two key ingredients are necessary in order for a detector to generate exactly one
+# detection per object:
+# 1. A loss that penalises double detections to teach the detector we want precisely one detection per object.
+# 2. Joint processing of neighbouring detections so the detector has the necessary information to tell whether an
+# object was detected multiple times.
+# In this paper, we explore a network design that accommodates both ingredients. To validate the claim that these are
+# key ingredients and our the proposed network is capable of performing NMS, we study our network in isolation without
+# end-to-end learning with the detector. That means the network operates solely on scored detections without image
+# features and as such can be considered a “pure NMS network”.
+
+# Our design avoids hard decisions and does not discard detections to produce a smaller set of detections. Instead,
+# we reformulate NMS as a rescoring task that seeks to decrease the score of detections that cover objects that already
+# have been detected, as in [13]. After rescoring, simple thresholding is sufficient to reduce the set of detections. For
+# evaluation we pass the full set of rescored detections to the evaluation script without any post processing
+
+ 
     for epoch in range(starting_epoch, starting_epoch + num_epochs):
         # learning rate update after a set number of epochs
         if (epoch % 5 == 0 and epoch > 0):
