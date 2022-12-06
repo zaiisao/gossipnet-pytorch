@@ -298,7 +298,8 @@ class GNet(nn.Module):
 
 		# predicting new scores
 		objectnessScores = self.predictObjectnessScores(detFeatures)
-  
+         # objectnessScores = f(x_p) in Eq (1) in https://arxiv.org/pdf/1511.06437.pdf
+         # and = s_i
   #MJ: # new scores - a single (1) score per detection
 		# self.predictObjectnessScores = nn.Sequential(
 		# 							nn.Linear(self.shortcutDim, 1, bias=True),
@@ -320,6 +321,7 @@ class GNet(nn.Module):
 		# labels, dt_gt_matching = self.dtGtMatching(dt_gt_iou, objectnessScores)
 		# start = timer.time()
 		labels, _ = self.dtGtMatching(dt_gt_iou, objectnessScores) #
+        #MJ: objectnessScores: Recomputed scores for the detections
         # The output of self.dtGtMatching(dt_gt_iou, objectnessScores):
         #   labels: Boolean tensor representing which detections/samples are to be treated as true positives
 		#   dt_gt_matching: which detection gets matched to which gt
@@ -329,8 +331,11 @@ class GNet(nn.Module):
 		# equivalent 'tf.nn.sigmoid_cross_entropy_with_logits' -> 'torch.nn.BCEWithLogitsLoss'
   
 		sampleLossFunction = nn.BCEWithLogitsLoss(weight=None, reduction='none')
+  #MJ: https://pytorch.org/docs/stable/generated/torch.nn.BCEWithLogitsLoss.html
   
-		sampleLosses = sampleLossFunction(objectnessScores, labels)
+		sampleLosses = sampleLossFunction(objectnessScores, labels)  #MJ: labels = targets: their values should be in (0,1)
+                   #MJ: labels: Boolean tensor representing which detections/samples are to be treated as true positives
+                   # loss(objectnessScores, labels) = list( labels[i]*log (sigmoid(objectnessScores[i])) + (1-labels[i] * log( 1- sigmoid(objectnessScores[i])))
 
 		lossNormalized = torch.mean(sampleLosses)
 		lossUnnormalized = torch.sum(sampleLosses)
