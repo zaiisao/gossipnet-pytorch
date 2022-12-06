@@ -245,7 +245,8 @@ def train(loader, network, optimizer, epoch, args):
 
         # saving model state
         # if ((i+1) % 100 == 0 or i == 3779):  
-    print("Saving model, epoch: {}, iteration: {} ---".format(epoch, i)), 
+    print("Saving model, epoch: {}, iteration: {} ---".format(epoch, i))
+    print(f"Loss: {lossNormalized}")
     torch.save({
         'epoch': str(epoch) + '_' + str(i),
         'model_state_dict': network.state_dict(),
