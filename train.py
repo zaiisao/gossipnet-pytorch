@@ -2,6 +2,7 @@ import torch
 
 import json
 import time as timer
+import argparse
 
 from model.gnet import GNet
 #from dataloader.detVRDLoader import detVRDLoader
@@ -12,10 +13,15 @@ def main():
     """
         Main program for begining training
     """
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("data_dir", help="data directory", type=str, default=None)
+    args = parser.parse_args()    
+
     print ("Loading VRD training dataset, "),
     # trainData = detVRDLoader("./data/vrd/train-fnet-no12000-nms0.7/")
     # trainData = detVRDLoader("./data/vrd/train/")
-    trainData = BeatLoader("../gtzan/data")
+    trainData = BeatLoader(args.data_dir)
 
     print ("{} files loaded".format(len(trainData)))
 
@@ -155,6 +161,18 @@ def main():
 # have been detected, as in [13]. After rescoring, simple thresholding is sufficient to reduce the set of detections. For
 # evaluation we pass the full set of rescored detections to the evaluation script without any post processing
 
+# The matching ensures that each object can only be detected once and any further detection counts as a mistake.
+
+# Ultimately a detector is judged by the evaluation criterion of a benchmark, which in turn defines a matching
+# strategy to decide which detections are correct or wrong. This is the matching that should be used at training time.
+
+# Typically benchmarks sort detections in descending order by their confidence and match detections in this order to
+# objects, preferring most overlapping objects. Since already matched objects cannot be matched again surplus detections
+# are counted as false positives that decrease the precision of the detector. We use this matching strategy.
+# We use the result of the matching as label.
+
+# We use the result of the matching as labels for the classifier: successfully matched detections are positive training
+# examples, while unmatched detections are negative training  examples for a standard binary loss.
  
     for epoch in range(starting_epoch, starting_epoch + num_epochs):
         # learning rate update after a set number of epochs
