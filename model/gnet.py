@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils import xavierInitialization
+from model.utils import xavierInitialization
 
 class Block(nn.Module):
 	"""
@@ -151,7 +151,7 @@ class GNet(nn.Module):
 			Initializing the gossipnet architecture
 			Input:
 				num_classes: Number of classes in the dataset
-				num_blocks: Number of blocks to be defined in the network
+				num_blocks: Number of blocks to be defined in the network; =4
 				class_weights: ?
 		"""
 		super(GNet, self).__init__()
@@ -295,8 +295,8 @@ class GNet(nn.Module):
 		objectnessScores = self.predictObjectnessScores(detFeatures)
 		objectnessScores = objectnessScores.reshape(-1)
 
-		# test mode should return from here
-		return objectnessScores
+		# # test mode should return from here
+		# return objectnessScores
 
 		# computing IoU between detections and ground truth
 		dt_gt_iou = self.iou(dtBoxesData, gtBoxesData)
@@ -408,8 +408,8 @@ class GNet(nn.Module):
 		# we don't have multi-class score for detections just the objectness-score
 
 		# getting objectness-score
-		cScores = detScores[c_idxs]
-		nScores = detScores[n_idxs]
+		cScores = detScores[c_idxs].unsqueeze(dim=1)
+		nScores = detScores[n_idxs].unsqueeze(dim=1)
 
 		# gathering ious values between pairs
 		ious = dt_dt_iou[neighbourPairIds[:, 0], neighbourPairIds[:, 1]].reshape(-1, 1)

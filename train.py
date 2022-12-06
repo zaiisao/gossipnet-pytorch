@@ -4,30 +4,36 @@ import json
 import time as timer
 
 from model.gnet import GNet
-from dataloader.detVRDLoader import detVRDLoader
+#from dataloader.detVRDLoader import detVRDLoader
+from dataloader.BeatLoader import BeatLoader
 
 
 def main():
     """
         Main program for begining training
     """
-    # print ("Loading VRD training dataset, "),
+    print ("Loading VRD training dataset, "),
     # trainData = detVRDLoader("./data/vrd/train-fnet-no12000-nms0.7/")
-    # # trainData = detVRDLoader("./data/vrd/train/")
-    # print ("{} files loaded".format(len(trainData)))
+    # trainData = detVRDLoader("./data/vrd/train/")
+    trainData = BeatLoader("/mount/beat-tracking/gtzan/data")
 
-    # trainLoader = torch.utils.data.DataLoader(trainData, 
-    #                                             batch_size=1, 
-    #                                             shuffle=True,
-    #                                             collate_fn=detVRDLoader.collate)
+    print ("{} files loaded".format(len(trainData)))
 
-    print ("Loading VRD testing dataset, "),
-    testData = detVRDLoader("./data/vrd/test-fnet-no12000-nms0.6/")
-    print ("{} files loaded".format(len(testData)))
-
-    testLoader = torch.utils.data.DataLoader(testData, 
+    trainLoader = torch.utils.data.DataLoader(trainData, 
                                                 batch_size=1, 
-                                                collate_fn=detVRDLoader.collate)
+                                                shuffle=True,
+                                                #collate_fn=detVRDLoader.collate)
+                                                collate_fn=BeatLoader.collate)
+
+    # print ("Loading VRD testing dataset, "),
+    # #testData = detVRDLoader("./data/vrd/test-fnet-no12000-nms0.6/")
+    # # testData = BeatLoader("/mount/beat-tracking/gtzan/data")
+    # print ("{} files loaded".format(len(testData)))
+
+    # testLoader = torch.utils.data.DataLoader(testData, 
+    #                                             batch_size=1, 
+    #                                             #collate_fn=detVRDLoader.collate)
+    #                                             collate_fn=BeatLoader.collate)
 
     ## testing VRD trainLoader
     # for i, batch in enumerate(trainLoader):
@@ -57,51 +63,56 @@ def main():
     # for param_group in optimizer.param_groups:
     #     print (param_group['lr'])
     
-    # num_epochs = 15 # TODO: move to a configuration file
+    num_epochs = 15 # TODO: move to a configuration file
     # starting_epoch = 0
 
     # resuming training # TODO: move to cmd arguments
     # print ("loading saved model...")
-    checkpoint = torch.load("./trained_models/first-training/train-0.7-0.5-350-0.3-4-35-full/state_34_2000.pth")
-    net.load_state_dict(checkpoint['model_state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    # starting_epoch = int(checkpoint['epoch'].split("_")[0]) + 1
+    
+    should_load_checkpoint = False
+    if should_load_checkpoint:
+        checkpoint = torch.load("./trained_models/first-training/train-0.7-0.5-350-0.3-4-35-full/state_34_2000.pth")
+        net.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+    #starting_epoch = int(checkpoint['epoch'].split("_")[0]) + 1
+    starting_epoch = 0
 
     ## testing code
     # single image for now
-    net.eval()
-    with torch.no_grad(): 
+    # net.eval()
+    # with torch.no_grad(): 
 
-        # count = 0
+    #     # count = 0
 
-        for i, batch in enumerate(testLoader):
-            print ("{}/{}".format(i+1, len(testLoader)))
-            predictions = net(data=batch)
+    #     for i, batch in enumerate(testLoader):
+    #         print ("{}/{}".format(i+1, len(testLoader)))
+    #         predictions = net(data=batch)
             
-            save = dict()
-            save['scale'] = batch[0]['scale']
-            # save['gt_boxes'] = batch[0]['gt_boxes'].tolist()
-            save['detections'] = batch[0]['detections'].tolist()[:300]
-            save['predictions'] = predictions.detach().cpu().numpy().tolist()
+    #         save = dict()
+    #         save['scale'] = batch[0]['scale']
+    #         # save['gt_boxes'] = batch[0]['gt_boxes'].tolist()
+    #         save['detections'] = batch[0]['detections'].tolist()[:300]
+    #         save['predictions'] = predictions.detach().cpu().numpy().tolist()
 
-            # print (len(save['detections']))
+    #         # print (len(save['detections']))
 
-            with open("./setting2-0.2/" + batch[0]['file_name'], 'w') as f:
-                json.dump(save, f)
+    #         with open("./setting2-0.2/" + batch[0]['file_name'], 'w') as f:
+    #             json.dump(save, f)
 
-    ## begining training
-    # for epoch in range(starting_epoch, starting_epoch + num_epochs):
-    #     # learning rate update after a set number of epochs
-    #     if (epoch % 5 == 0 and epoch > 0):
-    #         learning_rate /= 10
-    #         print ("Reducing learning rate to {}".format(learning_rate))
-    #         for param_group in optimizer.param_groups:
-    #             param_group['lr'] = learning_rate
+    # begining training
+    for epoch in range(starting_epoch, starting_epoch + num_epochs):
+        # learning rate update after a set number of epochs
+        if (epoch % 5 == 0 and epoch > 0):
+            learning_rate /= 10
+            print ("Reducing learning rate to {}".format(learning_rate))
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = learning_rate
 
-    #     # call training function
-    #     train(trainLoader, net, optimizer, epoch)
+        # call training function
+        train(trainLoader, net, optimizer, epoch)
 
-        # print (test-run)
+        print (test-run)
 
 def train(loader, network, optimizer, epoch):
     """
