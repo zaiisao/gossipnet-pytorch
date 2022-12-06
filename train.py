@@ -20,7 +20,7 @@ def main():
     parser.add_argument("--lr", type=float, default=0.0001)
     parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--no_detections", type=int, default=9999999)
-    args = parser.parse_args()    
+    args = parser.parse_args()
 
     print ("Loading VRD training dataset, "),
     # trainData = detVRDLoader("./data/vrd/train-fnet-no12000-nms0.7/")
@@ -244,16 +244,16 @@ def train(loader, network, optimizer, epoch, args):
         print ("Epoch: {}, Iteration: {}, Loss-Normalized: {}, Loss-Unnormalized: {}, Batch-Time: {}".format(epoch, i, lossNormalized, lossUnnormalized, round((end2 - start1), 3)))
 
         # saving model state
-        if ((i+1) % 100 == 0 or i == 3779):  
-            print("Saving model, epoch: {}, iteration: {} ---".format(epoch, i)), 
-            torch.save({
-                'epoch': str(epoch) + '_' + str(i),
-                'model_state_dict': network.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'lossNormalized': lossNormalized,   #MJ: lossNormalized was computed to be simply displayed
-                'lossUnnormalized': lossUnnormalized
-                }, "./trained_models/state_" + str(epoch) + "_" + str(i) + ".pth")
-            print ("completed")
+        # if ((i+1) % 100 == 0 or i == 3779):  
+    print("Saving model, epoch: {}, iteration: {} ---".format(epoch, i)), 
+    torch.save({
+        'epoch': str(epoch) + '_' + str(i),
+        'model_state_dict': network.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'lossNormalized': lossNormalized,   #MJ: lossNormalized was computed to be simply displayed
+        'lossUnnormalized': lossUnnormalized
+        }, "./trained_models/state_" + str(epoch) + "_" + str(i) + ".pth")
+    print ("completed")
 
     print ("Average neighbour pairs: {}".format(countN/3780.0))
     print ("Average forward pass time (in ms): {}".format(timeFP/3780.0))
