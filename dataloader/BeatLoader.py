@@ -36,8 +36,6 @@ class BeatLoader(data.Dataset):
     
     def load(self):
         for index in tqdm(range(len(self.files))):
-            if index == 50:
-                break #TESTING
             selected_audio_file = self.files[index]
             selected_file_name = selected_audio_file.replace('.wav', '.txt')
             
