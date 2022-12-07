@@ -2,6 +2,7 @@ import os
 import json
 
 import numpy as np
+from tqdm import tqdm
 
 import torch.utils.data as data
 
@@ -34,7 +35,9 @@ class BeatLoader(data.Dataset):
         return self.data[index]
     
     def load(self):
-        for index in range(len(self.files)):
+        for index in tqdm(range(len(self.files))):
+            if index == 50:
+                break #TESTING
             selected_audio_file = self.files[index]
             selected_file_name = selected_audio_file.replace('.wav', '.txt')
             

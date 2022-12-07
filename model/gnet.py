@@ -204,18 +204,33 @@ class GNet(nn.Module):
 		self.weightInitMethod = 'xavier'
 		self.initializeParameters(method=self.weightInitMethod)
 
-	def forward(self, data, no_detections=300): #MJ: data is a batch with batch_size =1
+	def forward(self, batch, no_detections=300): #MJ: data is a batch with batch_size =1
 		"""
 			Main computation
 		"""
-		# since batch size will always remain as 1
-		data = data[0]
+		# # since batch size will always remain as 1
+		# data = data[0]
+		all_normalized_losses = torch.zeros(0)
+		all_nonnormalized_losses = torch.zeros(0)
+		all_objectiveness_scores = torch.zeros(0)
+  
+		if torch.cuda.is_available():
+			all_normalized_losses = all_normalized_losses.to(device='cuda')
+			all_nonnormalized_losses = all_nonnormalized_losses.to(device='cuda')
+			all_objectiveness_scores = all_objectiveness_scores.to(device='cuda')
 
-		# 15000 boxes are too much for now - reducing - change later
-		
-		detScores = data['scores'][:no_detections]
-		dtBoxes = data['detections'][:no_detections]
-		gtBoxes = data['gt_boxes']		
+		for item in batch:
+			losses, objectnessScores = self.compute(item, no_detections)
+			all_normalized_losses = torch.cat(all_normalized_losses, losses[0])
+			all_nonnormalized_losses = torch.cat(all_nonnormalized_losses, losses[1])
+			all_objectiveness_scores = torch.cat(all_objectiveness_scores, objectnessScores)
+   
+		return all_normalized_losses, all_nonnormalized_losses, all_objectiveness_scores
+
+	def compute(self, data, no_detections):
+		detScores = data['scores'][:no_detections]  #confidence scores for bbox predictions by beat-fcos.
+		dtBoxes = data['detections'][:no_detections] #bbox predictions by beat-fcos
+		gtBoxes = data['gt_boxes']		              #annotations for gt boxes
 
 		detScores = torch.from_numpy(detScores).type(torch.cuda.FloatTensor)
 		dtBoxes = torch.from_numpy(dtBoxes).cuda()
@@ -225,7 +240,10 @@ class GNet(nn.Module):
 		dtBoxesData = self.getBoxData(dtBoxes)
 		gtBoxesData = self.getBoxData(gtBoxes)
 
-		# computing IoU between detections and detections
+		# computing IoU matrix between detections and detections: 
+        # MJ: It is an association matrix between detections for deciding which detections are neighbors, i.e,
+        # the detections that may point to the same object.
+        #
 		dt_dt_iou = self.iou(dtBoxesData, dtBoxesData)
 
 		# we don't have classes for detections - just the gt_classes
@@ -233,7 +251,7 @@ class GNet(nn.Module):
 
 		# config 0.
 		# finding neighbours of all detections - torch.nonzero() equivalent of tf.where(condition)
-		neighbourPairIds = torch.nonzero(torch.ge(dt_dt_iou, self.neighbourIoU))
+		neighbourPairIds = torch.nonzero(torch.ge(dt_dt_iou, self.neighbourIoU))  #MJ: self.neighbourIoU = 0.2
 
 
 
@@ -270,9 +288,17 @@ class GNet(nn.Module):
 		self.neighbourPairIds = neighbourPairIds
 		# print ("Number of neighbours being processed: {}".format(len(neighbourPairIds)))
 
-		# generating pairwise features
-		pairFeatures = self.generatePairwiseFeatures(pair_c_idxs, pair_n_idxs, neighbourPairIds, detScores, dt_dt_iou, dtBoxesData)
-		pairFeatures = self.pairwiseFeaturesFC(pairFeatures)
+		# generating pairwise features, which are used to compute objectnessScores = self.predictObjectnessScores(detFeatures)
+		pairFeaturesDescriptors = self.generatePairwiseFeatures(pair_c_idxs, pair_n_idxs, neighbourPairIds, detScores, dt_dt_iou, dtBoxesData)
+		pairFeatures = self.pairwiseFeaturesFC(pairFeaturesDescriptors)
+  
+        # MJ: self.pairwiseFeaturesFC extract abstract feature maps from the feature descriptors of the detection pairs
+		# Fully connected layers to generate pairwise features:
+		# 
+		# for layer in self.pwfeat_gen_layers:
+		# 	pairFeatures = layer(pairFeatures)
+
+		# return pairFeatures
 
 		numDets = dtBoxes.shape[0]
 
@@ -308,8 +334,8 @@ class GNet(nn.Module):
 		objectnessScores = objectnessScores.reshape(-1)
 
 		# # test mode should return from here
-		if not self.training:
-			return objectnessScores
+		# if not self.training:
+		# 	return objectnessScores
 
 		# computing IoU between detections and ground truth
 		dt_gt_iou = self.iou(dtBoxesData, gtBoxesData)
@@ -340,7 +366,7 @@ class GNet(nn.Module):
 		lossNormalized = torch.mean(sampleLosses)
 		lossUnnormalized = torch.sum(sampleLosses)
 
-		return (lossNormalized, lossUnnormalized)
+		return (lossNormalized, lossUnnormalized), objectnessScores
 
 	def initializeParameters(self, method='xavier'):
 		"""
