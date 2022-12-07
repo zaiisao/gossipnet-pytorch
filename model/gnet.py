@@ -210,22 +210,27 @@ class GNet(nn.Module):
 		"""
 		# # since batch size will always remain as 1
 		# data = data[0]
-		all_normalized_losses = torch.zeros(0)
-		all_nonnormalized_losses = torch.zeros(0)
-		all_objectiveness_scores = torch.zeros(0)
-  
-		if torch.cuda.is_available():
-			all_normalized_losses = all_normalized_losses.to(device='cuda')
-			all_nonnormalized_losses = all_nonnormalized_losses.to(device='cuda')
-			all_objectiveness_scores = all_objectiveness_scores.to(device='cuda')
+		all_normalized_losses = []
+		all_nonnormalized_losses = []
+		all_objectiveness_scores = []
 
 		for item in batch:
+			boxes_to_keep = item['scores'] > 0.1
+			item['scores'] = item['scores'][boxes_to_keep]
+			item['detections'] = item['detections'][boxes_to_keep]
+
 			losses, objectnessScores = self.compute(item, no_detections)
-			all_normalized_losses = torch.cat(all_normalized_losses, losses[0])
-			all_nonnormalized_losses = torch.cat(all_nonnormalized_losses, losses[1])
-			all_objectiveness_scores = torch.cat(all_objectiveness_scores, objectnessScores)
-   
-		return all_normalized_losses, all_nonnormalized_losses, all_objectiveness_scores
+			all_normalized_losses.append(losses[0])
+			all_nonnormalized_losses.append(losses[1])
+			all_objectiveness_scores.append(objectnessScores)
+
+		if torch.cuda.is_available():
+			all_objectiveness_scores = torch.stack(all_objectiveness_scores).to(device='cuda')
+
+		normalized_loss = sum(all_normalized_losses) / len(all_normalized_losses)
+		nonnormalized_loss = sum(all_nonnormalized_losses) / len(all_nonnormalized_losses)
+
+		return normalized_loss, nonnormalized_loss, all_objectiveness_scores
 
 	def compute(self, data, no_detections):
 		detScores = data['scores'][:no_detections]  #confidence scores for bbox predictions by beat-fcos.

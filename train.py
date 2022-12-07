@@ -1,6 +1,6 @@
 import torch
 
-import json
+import os
 import time as timer
 import argparse
 
@@ -215,8 +215,7 @@ def train(loader, network, optimizer, epoch, args):
 
         start1 = timer.time()
         # computing forward pass and the loss
-        losses, _ = network(batch, no_detections=args.no_detections)
-        lossNormalized, lossUnnormalized = losses
+        lossNormalized, lossUnnormalized, _ = network(batch, no_detections=args.no_detections)
         #MJ: within network:  lossNormalized = torch.mean(sampleLosses)
 		#MJ:                  lossUnnormalized = torch.sum(sampleLosses)
         end1 = timer.time()
@@ -247,19 +246,22 @@ def train(loader, network, optimizer, epoch, args):
 
         #if ((i+1) % 100 == 0 or i == 3779):   
     
-        batch_mean_loss = sum(batch_losses) / len(batch_losses)
-        batch_losses.clear()
-    
-        print("Saving model, epoch: {}, iteration: {} ---".format(epoch, i))
-        print(f"Batch mean loss: {batch_mean_loss}")
+    batch_mean_loss = sum(batch_losses) / len(batch_losses)
+    batch_losses.clear()
 
-        torch.save({
-            'epoch': str(epoch) + '_' + str(i),
-            'model_state_dict': network.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'lossNormalized': lossNormalized,   #MJ: lossNormalized was computed to be simply displayed
-            'lossUnnormalized': lossUnnormalized
-            }, "./trained_models/state_" + str(epoch) + "_" + str(i) + ".pth")
+    print("Saving model, epoch: {}, iteration: {} ---".format(epoch, i))
+    print(f"Batch mean loss: {batch_mean_loss}")
+    
+    if not os.path.exists("./trained_models"):
+        os.makedirs("./trained_models")
+
+    torch.save({
+        'epoch': str(epoch) + '_' + str(i),
+        'model_state_dict': network.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'lossNormalized': lossNormalized,   #MJ: lossNormalized was computed to be simply displayed
+        'lossUnnormalized': lossUnnormalized
+        }, "./trained_models/state_" + str(epoch) + "_" + str(i) + ".pth")
 
     #MJ: END for i, batch in enumerate(loader)
     print ("completed")
