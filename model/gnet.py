@@ -215,7 +215,7 @@ class GNet(nn.Module):
 		all_objectiveness_scores = []
 
 		for item in batch:
-			boxes_to_keep = item['scores'] > 0.1
+			boxes_to_keep = item['scores'] > 0.2
 			item['scores'] = item['scores'][boxes_to_keep]
 			item['detections'] = item['detections'][boxes_to_keep]
 
