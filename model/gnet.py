@@ -142,6 +142,41 @@ class Block(nn.Module):
 		self.outputFC.apply(initializationMethod)
 
 
+
+                # # overlaps
+                # self.det_anno_iou = self._iou(
+                #     self.dets_boxdata, self.gt_boxdata, self.gt_crowd)
+                
+                # self.det_det_iou = self._iou(self.dets_boxdata, self.dets_boxdata)
+                
+                # if self.multiclass:
+                #     # set overlaps of detection and annotations to 0 if they
+                #     # have different classes, so they don't get matched in the
+                #     # loss
+                #     print('doing multiclass NMS')
+                #     same_class = tf.equal(
+                #         tf.reshape(self.det_classes, [-1, 1]),
+                #         tf.reshape(self.gt_classes, [1, -1]))
+                #     zeros = tf.zeros_like(self.det_anno_iou)
+                    
+                #     self.det_anno_iou = tf.select(same_class,
+                #                                   self.det_anno_iou, zeros)
+                    
+                    
+                    
+    # def _geometry_feats(self, c_idxs, n_idxs):
+    #     with tf.variable_scope('pairwise_features'):
+    #         if self.multiclass:
+    #             mc_score_shape = tf.pack([self.num_dets, self.num_classes])
+    #             # classes are one-based (0 is background)
+    #             mc_score_idxs = tf.stack(
+    #                 [tf.range(self.num_dets), self.det_classes - 1], axis=1)
+    #             det_scores = tf.scatter_nd(
+    #                 mc_score_idxs, self.det_scores, mc_score_shape)
+    #         else:
+    #             det_scores = tf.expand_dims(self.det_scores, -1)
+                
+                
 class GNet(nn.Module):
 	"""
 		'GossipNet' architecture
@@ -215,7 +250,7 @@ class GNet(nn.Module):
 		all_objectiveness_scores = []
 
 		for item in batch:
-			boxes_to_keep = item['scores'] > 0.2
+			boxes_to_keep = item['scores'] > 0.2  #MJ: boxes_to_keep is a boolean array
 			item['scores'] = item['scores'][boxes_to_keep]
 			item['detections'] = item['detections'][boxes_to_keep]
 
@@ -233,30 +268,33 @@ class GNet(nn.Module):
 		return normalized_loss, nonnormalized_loss, all_objectiveness_scores
 
 	def compute(self, data, no_detections):
-		detScores = data['scores'][:no_detections]  #confidence scores for bbox predictions by beat-fcos.
-		dtBoxes = data['detections'][:no_detections] #bbox predictions by beat-fcos
-		gtBoxes = data['gt_boxes']		              #annotations for gt boxes
+		detScores = data['scores'][:no_detections]  #confidence scores for bbox predictions by beat-fcos. detScores :len=822, say
+		dtBoxes = data['detections'][:no_detections] #bbox predictions by beat-fcos                       dtBoxes : len=822
+		gtBoxes = data['gt_boxes']		              #annotations for gt boxes                           gtBoxes : len=98
 
 		detScores = torch.from_numpy(detScores).type(torch.cuda.FloatTensor)
 		dtBoxes = torch.from_numpy(dtBoxes).cuda()
 		gtBoxes = torch.from_numpy(gtBoxes).cuda()
 
 		# getting box information (x1, y1, w, h, x2, y2, area) from (x1,y1,x2,y2)
-		dtBoxesData = self.getBoxData(dtBoxes)
-		gtBoxesData = self.getBoxData(gtBoxes)
+		dtBoxesData = self.getBoxData(dtBoxes) #MJ: return (x1, y1, width, height, x2, y2, area)
+		gtBoxesData = self.getBoxData(gtBoxes) #MJ: dtBoxesData[0].shape = (822,1)
 
 		# computing IoU matrix between detections and detections: 
         # MJ: It is an association matrix between detections for deciding which detections are neighbors, i.e,
         # the detections that may point to the same object.
         #
-		dt_dt_iou = self.iou(dtBoxesData, dtBoxesData)
+		dt_dt_iou = self.iou(dtBoxesData, dtBoxesData)  #MJ: dt_dt_iou matrix: shape = (822,822), say;from PIL import Imageim = Image.fromarray(np.uint8(mat))
 
 		# we don't have classes for detections - just the gt_classes
 		# so doing single class nms - discuss on this! - okay!
 
+        ##############################################################################
+        #MJ: Make the dt_dt_iou between beat and downbeat predictions zero.
+         
 		# config 0.
 		# finding neighbours of all detections - torch.nonzero() equivalent of tf.where(condition)
-		neighbourPairIds = torch.nonzero(torch.ge(dt_dt_iou, self.neighbourIoU))  #MJ: self.neighbourIoU = 0.2
+		neighbourPairIds = torch.nonzero(torch.ge(dt_dt_iou, self.neighbourIoU))  #MJ: self.neighbourIoU = 0.2; neighbourPairIds: shape =(23082,2),2:(i,j), from 822x822=675,684
 
 
 
@@ -293,8 +331,9 @@ class GNet(nn.Module):
 		self.neighbourPairIds = neighbourPairIds
 		# print ("Number of neighbours being processed: {}".format(len(neighbourPairIds)))
 
-		# generating pairwise features, which are used to compute objectnessScores = self.predictObjectnessScores(detFeatures)
-		pairFeaturesDescriptors = self.generatePairwiseFeatures(pair_c_idxs, pair_n_idxs, neighbourPairIds, detScores, dt_dt_iou, dtBoxesData)
+		# 
+        # generate handcrafted pairwise features, which are used to compute objectnessScores = self.predictObjectnessScores(detFeatures)
+		pairFeaturesDescriptors =  self.generatePairwiseFeatures(pair_c_idxs, pair_n_idxs, neighbourPairIds, detScores, dt_dt_iou, dtBoxesData)
 		pairFeatures = self.pairwiseFeaturesFC(pairFeaturesDescriptors)
   
         # MJ: self.pairwiseFeaturesFC extract abstract feature maps from the feature descriptors of the detection pairs
@@ -305,7 +344,7 @@ class GNet(nn.Module):
 
 		# return pairFeatures
 
-		numDets = dtBoxes.shape[0]
+		numDets = dtBoxes.shape[0]  #MJ= 822
 
 		# input to the first block must be all zero's
 		# much faster - https://discuss.pytorch.org/t/creating-tensors-on-gpu-directly/2714
@@ -327,8 +366,8 @@ class GNet(nn.Module):
 		for layer in self.score_fc_layers:
 			detFeatures = layer(detFeatures)
 
-		# predicting new scores
-		objectnessScores = self.predictObjectnessScores(detFeatures)
+		# predicting new scores: objectnessScores: shape = (822,)
+		objectnessScores = self.predictObjectnessScores(detFeatures)  #MJ: detFeatures: shape =(822, 128), 128-dim vector for 822 detections
          # objectnessScores = f(x_p) in Eq (1) in https://arxiv.org/pdf/1511.06437.pdf
          # and = s_i
   #MJ: # new scores - a single (1) score per detection
@@ -336,14 +375,17 @@ class GNet(nn.Module):
 		# 							nn.Linear(self.shortcutDim, 1, bias=True),
 		# 						)
   
-		objectnessScores = objectnessScores.reshape(-1)
+		objectnessScores = objectnessScores.reshape(-1)  #MJ: objectnessScore: shape = (822,1)
 
 		# # test mode should return from here
 		# if not self.training:
 		# 	return objectnessScores
 
 		# computing IoU between detections and ground truth
-		dt_gt_iou = self.iou(dtBoxesData, gtBoxesData)
+		dt_gt_iou = self.iou(dtBoxesData, gtBoxesData)  #MJ: dt_gt_iou: shape = (822,98)
+  
+        #################################################################
+        #MJ: make dt_gt_iou between beat and downbeat zero.
 
 		### label matching for training
 		# original implementation works on COCO dataset and has 'gt_crowd' detections
@@ -351,7 +393,7 @@ class GNet(nn.Module):
 		# since we are using VRD (and VG later) datasets, our logic doesn't have to be complicated
 		# labels, dt_gt_matching = self.dtGtMatching(dt_gt_iou, objectnessScores)
 		# start = timer.time()
-		labels, _ = self.dtGtMatching(dt_gt_iou, objectnessScores) #
+		labels, _ = self.dtGtMatching(dt_gt_iou, objectnessScores) # #objectnessScores: objectnessScores of all detections. They are used only for speed up of the search/match??.
         #MJ: objectnessScores: Recomputed scores for the detections
         # The output of self.dtGtMatching(dt_gt_iou, objectnessScores):
         #   labels: Boolean tensor representing which detections/samples are to be treated as true positives
@@ -364,7 +406,7 @@ class GNet(nn.Module):
 		sampleLossFunction = nn.BCEWithLogitsLoss(weight=None, reduction='none')
   #MJ: https://pytorch.org/docs/stable/generated/torch.nn.BCEWithLogitsLoss.html
   
-		sampleLosses = sampleLossFunction(objectnessScores, labels)  #MJ: labels = targets: their values should be in (0,1)
+		sampleLosses = sampleLossFunction(objectnessScores, labels)  #MJ: labels = targets: their values should be 0 or 1
                    #MJ: labels: Boolean tensor representing which detections/samples are to be treated as true positives
                    # loss(objectnessScores, labels) = list( labels[i]*log (sigmoid(objectnessScores[i])) + (1-labels[i] * log( 1- sigmoid(objectnessScores[i])))
 
@@ -398,10 +440,10 @@ class GNet(nn.Module):
 				iouThresh: iou-threshold for the detections to be considered as positives
 			Return:
 				labels: Boolean tensor representing which detections are to be treated as true positives
-				dt_gt_matching: which detection gets matched to which gt
+				dt_gt_matching: which detection gets matched to which gt: The gt box matched to each detection (whose num is 822,say)
 		"""
 		# sorting objectness score - getting their index's 
-		objectnessScores = objectnessScores.reshape(-1)
+		objectnessScores = objectnessScores.reshape(-1)   #
 		sortedIndexs = torch.argsort(objectnessScores, descending=True)
 
 		numDts = dt_gt_iou.shape[0]
@@ -409,20 +451,20 @@ class GNet(nn.Module):
 
 		# each gt need to be matched exactly once
 		# isGtMatched = torch.zeros(numGts, dtype=torch.int32)
-		isGtMatched = torch.cuda.IntTensor(numGts).fill_(0)
+		isGtMatched = torch.cuda.IntTensor(numGts).fill_(0)     #MJ: isGtMatched: shape = (98,)
 
 		# labels = torch.zeros(numDts, dtype=torch.float32)
 		labels = torch.cuda.FloatTensor(numDts).fill_(0)
 		# dt_gt_matching = torch.zeros(numDts, dtype=torch.int32)
 		# dt_gt_matching.fill_(-1)
-		dt_gt_matching = torch.cuda.IntTensor(numDts).fill_(-1)
+		dt_gt_matching = torch.cuda.IntTensor(numDts).fill_(-1)  #MJ: dt_gt_matching: shape =(822,)
 
-		for i in range(numDts):
-			dtIndex = sortedIndexs[i]
+		for i in range(numDts): #MJ: 822
+			dtIndex = sortedIndexs[i]  #MJ: sortedIndexs from objectnessScores
 			iou = iouThresh
 			match = -1
 
-			for gtIndex in range(numGts):
+			for gtIndex in range(numGts):  #MJ: 98
 				# is gt already matched
 				if isGtMatched[gtIndex] == 1:
 					continue
@@ -432,17 +474,17 @@ class GNet(nn.Module):
 					continue
 				
 				# store the best detection
-				iou = dt_gt_iou[dtIndex, gtIndex]
+				iou = dt_gt_iou[dtIndex, gtIndex]  #MJ: dtIndex=460; gtIndex=85, say; iou = 0.7792
 				match = gtIndex
 
 			if (match > -1):
-				isGtMatched[match] = 1
+				isGtMatched[match] = 1  #MJ: gt box at index match is matched to detection at index dtIndex
 				labels[dtIndex] = 1.
 				dt_gt_matching[dtIndex] = match
 
 		# print (isGtMatched)
 
-		return (labels, dt_gt_matching)
+		return (labels, dt_gt_matching) #MJ: if labels[i]=1, it means that detection i is the only positive anchor which predicts the target object at index match
 
 	def pairwiseFeaturesFC(self, pairFeatures):
 		"""
@@ -460,12 +502,12 @@ class GNet(nn.Module):
 		"""
 		# we don't have multi-class score for detections just the objectness-score
 
-		# getting objectness-score
-		cScores = detScores[c_idxs].unsqueeze(dim=1)
-		nScores = detScores[n_idxs].unsqueeze(dim=1)
+		# getting objectness-score: detScores: shape = torch.Size([822]); c_idxs, n_idxs: torch.Size([23082])
+		cScores = detScores[c_idxs].unsqueeze(dim=1) #MJ: cScores: shape = (23082,1)
+		nScores = detScores[n_idxs].unsqueeze(dim=1)  #MJ: nScores: shape = (23082,1)
 
-		# gathering ious values between pairs
-		ious = dt_dt_iou[neighbourPairIds[:, 0], neighbourPairIds[:, 1]].reshape(-1, 1)
+		# gathering/selecting ious values between pairs: dt_dt_iou: shape=(822,822)
+		ious = dt_dt_iou[neighbourPairIds[:, 0], neighbourPairIds[:, 1]].reshape(-1, 1) #shape=torch.Size([23082, 1])
 
 		x1, y1, w, h, _, _, _ = dtBoxesData
 		c_w = w[c_idxs]
@@ -492,10 +534,10 @@ class GNet(nn.Module):
 		h_diff = torch.log(n_h / c_h) / log2
 		aspect_diff = (torch.log(n_w / n_h) - torch.log(c_w / c_h)) / log2
 
-		# concatenating all properties
+		# concatenating all properties of each neighboring detection
 		pairFeatures = torch.cat((cScores, nScores, ious, x_dist, y_dist, l2_dist, w_diff, h_diff, aspect_diff), 1)
 
-		return pairFeatures
+		return pairFeatures #MJ: shape = (23082,9)
 
 	@staticmethod
 	def intersection(boxes1, boxes2):
