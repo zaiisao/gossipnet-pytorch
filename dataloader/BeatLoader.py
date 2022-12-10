@@ -95,7 +95,9 @@ class BeatLoader(data.Dataset):
                 }
 
                 self.data.append(data)
-
+            #END for class_id in range(num_classes)
+        #END for index in tqdm(range(len(self.files)))
+            
     @staticmethod
     def collate(items):
         """

@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "../beat-retinanet"
+		},
+		{
+			"path": "../gtzan"
+		},
+		{
+			"path": "."
+		},
+		{
+			"path": "../../../home/yeol/moon/gossipnet"
+		}
+	]
+}
