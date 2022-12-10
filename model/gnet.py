@@ -215,17 +215,26 @@ class GNet(nn.Module):
 		all_objectiveness_scores = []
 
 		for item in batch:
-			boxes_to_keep = item['scores'] > 0.2
-			item['scores'] = item['scores'][boxes_to_keep]
-			item['detections'] = item['detections'][boxes_to_keep]
+			#boxes_to_keep = item['scores'] > 0.2
 
-			losses, objectnessScores = self.compute(item, no_detections)
-			all_normalized_losses.append(losses[0])
-			all_nonnormalized_losses.append(losses[1])
+			#item['scores'] = item['scores'][boxes_to_keep]
+			#item['detections'] = item['detections'][boxes_to_keep]
+
+			if 'gt_boxes' not in item:
+				objectnessScores = self.compute(item, no_detections)
+			else:
+				losses, objectnessScores = self.compute(item, no_detections)
+
+				all_normalized_losses.append(losses[0])
+				all_nonnormalized_losses.append(losses[1])
+
 			all_objectiveness_scores.append(objectnessScores)
 
 		if torch.cuda.is_available():
 			all_objectiveness_scores = torch.stack(all_objectiveness_scores).to(device='cuda')
+
+		if len(all_normalized_losses) == 0 or len(all_nonnormalized_losses) == 0:
+			return all_objectiveness_scores
 
 		normalized_loss = sum(all_normalized_losses) / len(all_normalized_losses)
 		nonnormalized_loss = sum(all_nonnormalized_losses) / len(all_nonnormalized_losses)
@@ -235,15 +244,19 @@ class GNet(nn.Module):
 	def compute(self, data, no_detections):
 		detScores = data['scores'][:no_detections]  #confidence scores for bbox predictions by beat-fcos.
 		dtBoxes = data['detections'][:no_detections] #bbox predictions by beat-fcos
-		gtBoxes = data['gt_boxes']		              #annotations for gt boxes
+  
+		if 'gt_boxes' in data:
+			gtBoxes = data['gt_boxes']		              #annotations for gt boxes
+			gtBoxes = torch.from_numpy(gtBoxes).cuda()
+			gtBoxesData = self.getBoxData(gtBoxes)
 
-		detScores = torch.from_numpy(detScores).type(torch.cuda.FloatTensor)
-		dtBoxes = torch.from_numpy(dtBoxes).cuda()
-		gtBoxes = torch.from_numpy(gtBoxes).cuda()
+		if isinstance(detScores, np.ndarray):
+			detScores = torch.from_numpy(detScores).type(torch.cuda.FloatTensor)
+		# dtBoxes = torch.from_numpy(dtBoxes).cuda()
 
 		# getting box information (x1, y1, w, h, x2, y2, area) from (x1,y1,x2,y2)
 		dtBoxesData = self.getBoxData(dtBoxes)
-		gtBoxesData = self.getBoxData(gtBoxes)
+		# gtBoxesData = self.getBoxData(gtBoxes)
 
 		# computing IoU matrix between detections and detections: 
         # MJ: It is an association matrix between detections for deciding which detections are neighbors, i.e,
@@ -258,12 +271,8 @@ class GNet(nn.Module):
 		# finding neighbours of all detections - torch.nonzero() equivalent of tf.where(condition)
 		neighbourPairIds = torch.nonzero(torch.ge(dt_dt_iou, self.neighbourIoU))  #MJ: self.neighbourIoU = 0.2
 
-
-
 		# code to get number of neighbour pairs
 		# self.no_neighbour = len(neighbourPairIds)
-
-
 
 		# print ("No detections: {}, no pairs: {}".format(dtBoxes.shape[0], neighbourPairIds.shape[0]))
 
@@ -339,8 +348,8 @@ class GNet(nn.Module):
 		objectnessScores = objectnessScores.reshape(-1)
 
 		# # test mode should return from here
-		# if not self.training:
-		# 	return objectnessScores
+		if not self.training and 'gt_boxes' not in data:
+			return objectnessScores
 
 		# computing IoU between detections and ground truth
 		dt_gt_iou = self.iou(dtBoxesData, gtBoxesData)

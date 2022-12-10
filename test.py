@@ -69,6 +69,8 @@ def main():
             # save['gt_boxes'] = batch[0]['gt_boxes'].tolist()
             save['detections'] = batch[0]['detections'].tolist()#[:300]
             save['predictions'] = torch.sigmoid(predictions).detach().cpu().numpy().tolist()
+            
+            #MJ: predictions = (lossNormalized, lossUnnormalized), objectnessScores
 
             # print (len(save['detections']))
             #print(len(save['detections']), len(save['predictions']))
