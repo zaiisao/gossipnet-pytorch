@@ -55,7 +55,7 @@ class BeatLoader(data.Dataset):
 
             scores = []
 
-            gt_file = open(os.path.join(self.dir, selected_file))
+            gt_file = open(selected_file)
             gt_lines = gt_file.readlines()
             gt_file.close()
 
