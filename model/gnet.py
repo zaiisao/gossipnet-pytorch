@@ -143,40 +143,40 @@ class Block(nn.Module):
 
 
 
-                # # overlaps
-                # self.det_anno_iou = self._iou(
-                #     self.dets_boxdata, self.gt_boxdata, self.gt_crowd)
-                
-                # self.det_det_iou = self._iou(self.dets_boxdata, self.dets_boxdata)
-                
-                # if self.multiclass:
-                #     # set overlaps of detection and annotations to 0 if they
-                #     # have different classes, so they don't get matched in the
-                #     # loss
-                #     print('doing multiclass NMS')
-                #     same_class = tf.equal(
-                #         tf.reshape(self.det_classes, [-1, 1]),
-                #         tf.reshape(self.gt_classes, [1, -1]))
-                #     zeros = tf.zeros_like(self.det_anno_iou)
-                    
-                #     self.det_anno_iou = tf.select(same_class,
-                #                                   self.det_anno_iou, zeros)
-                    
-                    
-                    
-    # def _geometry_feats(self, c_idxs, n_idxs):
-    #     with tf.variable_scope('pairwise_features'):
-    #         if self.multiclass:
-    #             mc_score_shape = tf.pack([self.num_dets, self.num_classes])
-    #             # classes are one-based (0 is background)
-    #             mc_score_idxs = tf.stack(
-    #                 [tf.range(self.num_dets), self.det_classes - 1], axis=1)
-    #             det_scores = tf.scatter_nd(
-    #                 mc_score_idxs, self.det_scores, mc_score_shape)
-    #         else:
-    #             det_scores = tf.expand_dims(self.det_scores, -1)
-                
-                
+				# # overlaps
+				# self.det_anno_iou = self._iou(
+				#     self.dets_boxdata, self.gt_boxdata, self.gt_crowd)
+				
+				# self.det_det_iou = self._iou(self.dets_boxdata, self.dets_boxdata)
+				
+				# if self.multiclass:
+				#     # set overlaps of detection and annotations to 0 if they
+				#     # have different classes, so they don't get matched in the
+				#     # loss
+				#     print('doing multiclass NMS')
+				#     same_class = tf.equal(
+				#         tf.reshape(self.det_classes, [-1, 1]),
+				#         tf.reshape(self.gt_classes, [1, -1]))
+				#     zeros = tf.zeros_like(self.det_anno_iou)
+					
+				#     self.det_anno_iou = tf.select(same_class,
+				#                                   self.det_anno_iou, zeros)
+					
+					
+					
+	# def _geometry_feats(self, c_idxs, n_idxs):
+	#     with tf.variable_scope('pairwise_features'):
+	#         if self.multiclass:
+	#             mc_score_shape = tf.pack([self.num_dets, self.num_classes])
+	#             # classes are one-based (0 is background)
+	#             mc_score_idxs = tf.stack(
+	#                 [tf.range(self.num_dets), self.det_classes - 1], axis=1)
+	#             det_scores = tf.scatter_nd(
+	#                 mc_score_idxs, self.det_scores, mc_score_shape)
+	#         else:
+	#             det_scores = tf.expand_dims(self.det_scores, -1)
+				
+				
 class GNet(nn.Module):
 	"""
 		'GossipNet' architecture
@@ -285,30 +285,54 @@ class GNet(nn.Module):
 			gtBoxes = torch.from_numpy(gtBoxes).cuda()
 			gtBoxesData = self.getBoxData(gtBoxes)
 
+		multilabel = False
+		if 'gt_classes' in data and 'detection_classes' in data:
+			multilabel = True
+
+			gt_classes = data['gt_classes']
+			detection_classes = data['detection_classes'][:no_detections]
+
+			if isinstance(detScores, np.ndarray):
+				gt_classes = torch.from_numpy(gt_classes).type(torch.cuda.FloatTensor)
+	
+			if isinstance(dtBoxes, np.ndarray):
+				detection_classes = torch.from_numpy(detection_classes).type(torch.cuda.FloatTensor)
+
 		if isinstance(detScores, np.ndarray):
 			detScores = torch.from_numpy(detScores).type(torch.cuda.FloatTensor)
-		# dtBoxes = torch.from_numpy(dtBoxes).cuda()
+   
+		if isinstance(dtBoxes, np.ndarray):
+			dtBoxes = torch.from_numpy(dtBoxes).cuda()
 
 		# getting box information (x1, y1, w, h, x2, y2, area) from (x1,y1,x2,y2)
 		dtBoxesData = self.getBoxData(dtBoxes)   #MJ: return (x1, y1, width, height, x2, y2, area)
 		# gtBoxesData = self.getBoxData(gtBoxes) #MJ: dtBoxesData[0].shape = (822,1)
 
 		# computing IoU matrix between detections and detections: 
-        # MJ: It is an association matrix between detections for deciding which detections are neighbors, i.e,
-        # the detections that may point to the same object.
-        #
+		# MJ: It is an association matrix between detections for deciding which detections are neighbors, i.e,
+		# the detections that may point to the same object.
+		#
 		dt_dt_iou = self.iou(dtBoxesData, dtBoxesData)  #MJ: dt_dt_iou matrix: shape = (822,822), say;from PIL import Imageim = Image.fromarray(np.uint8(mat))
 
 		# we don't have classes for detections - just the gt_classes
 		# so doing single class nms - discuss on this! - okay!
 
-        ##############################################################################
-        #MJ: Make the dt_dt_iou between beat and downbeat predictions zero.
-         
+		##############################################################################
+		#MJ: Make the dt_dt_iou between beat and downbeat predictions zero.
+		
+		if multilabel:
+			dt_dt_same_class = torch.eq(detection_classes.reshape(-1, 1), detection_classes.reshape(1, -1))
+			dt_dt_iou = torch.where(
+				dt_dt_same_class,
+				dt_dt_iou,
+				torch.zeros(dt_dt_same_class.shape).to(dt_dt_same_class.device)
+			)
+
 		# config 0.
 		# finding neighbours of all detections - torch.nonzero() equivalent of tf.where(condition)
 		neighbourPairIds = torch.nonzero(torch.ge(dt_dt_iou, self.neighbourIoU))  #MJ: self.neighbourIoU = 0.2; neighbourPairIds: shape =(23082,2),2:(i,j), from 822x822=675,684
-
+        #MJ: returns a 2-D tensor where each row is the index (i,j) for a nonzero value. (N,1) or (N,2)
+        
 		# code to get number of neighbour pairs
 		# self.no_neighbour = len(neighbourPairIds)
 
@@ -333,19 +357,19 @@ class GNet(nn.Module):
 		# args[mask] = 100000 
 		# neighbourPairIds = torch.nonzero(torch.le(args, 49))
 
-		pair_c_idxs = neighbourPairIds[:, 0]
-		pair_n_idxs = neighbourPairIds[:, 1]
+		pair_c_idxs = neighbourPairIds[:, 0]  # pair_c_idxs may contain repeated indices
+		pair_n_idxs = neighbourPairIds[:, 1]  # pair_n_idxs may contain repeated indices
 
 		# model-check code - used in train.py
 		self.neighbourPairIds = neighbourPairIds
 		# print ("Number of neighbours being processed: {}".format(len(neighbourPairIds)))
 
 		# 
-        # generate handcrafted pairwise features, which are used to compute objectnessScores = self.predictObjectnessScores(detFeatures)
-		pairFeaturesDescriptors =  self.generatePairwiseFeatures(pair_c_idxs, pair_n_idxs, neighbourPairIds, detScores, dt_dt_iou, dtBoxesData)
-		pairFeatures = self.pairwiseFeaturesFC(pairFeaturesDescriptors)
+		# generate handcrafted pairwise features, which are used to compute objectnessScores = self.predictObjectnessScores(detFeatures)
+		pairFeaturesDescriptors =  self.generatePairwiseFeatures(pair_c_idxs, pair_n_idxs, neighbourPairIds, detScores, dt_dt_iou, dtBoxesData) 
+		pairFeatures = self.pairwiseFeaturesFC(pairFeaturesDescriptors)  #MJ: pairFeaturesDescriptors:  shape = (23082,9) 
   
-        # MJ: self.pairwiseFeaturesFC extract abstract feature maps from the feature descriptors of the detection pairs
+		# MJ: self.pairwiseFeaturesFC extract abstract feature maps from the feature descriptors of the detection pairs
 		# Fully connected layers to generate pairwise features:
 		# 
 		# for layer in self.pwfeat_gen_layers:
@@ -362,14 +386,14 @@ class GNet(nn.Module):
 
 		# getting refined features:
   
-    #MJ: 
-    # Detection features. The blocks of our network take the detection feature vector of each detection as input and outputs
+	#MJ: 
+	# Detection features. The blocks of our network take the detection feature vector of each detection as input and outputs
 	# an updated vector (see high-level illustration in figure 2). Outputs from one block are input to the next one. The
 	# values inside this c = 128 dimensional feature vector are learned implicitly during the training. 
 	# The output of the last block is used to generate the new detection score for each detection
 		detFeatures = startingFeatures
 		for layer in self.blockLayers:  # MJ: self.blockLayers = nn.ModuleList([Block() for _ in range(self.numBlocks)])
-			detFeatures = layer(detFeatures, pair_c_idxs, pair_n_idxs, pairFeatures)
+			detFeatures = layer(detFeatures, pair_c_idxs, pair_n_idxs, pairFeatures) #MJ: pairFeatures is fed into each block repeatedly
 
 		# passing through scoring FC layers
 		for layer in self.score_fc_layers:
@@ -377,8 +401,8 @@ class GNet(nn.Module):
 
 		# predicting new scores: objectnessScores: shape = (822,)
 		objectnessScores = self.predictObjectnessScores(detFeatures)  #MJ: detFeatures: shape =(822, 128), 128-dim vector for 822 detections
-         # objectnessScores = f(x_p) in Eq (1) in https://arxiv.org/pdf/1511.06437.pdf
-         # and = s_i
+		 # objectnessScores = f(x_p) in Eq (1) in https://arxiv.org/pdf/1511.06437.pdf
+		 # and = s_i
   #MJ: # new scores - a single (1) score per detection
 		# self.predictObjectnessScores = nn.Sequential(
 		# 							nn.Linear(self.shortcutDim, 1, bias=True),
@@ -393,8 +417,16 @@ class GNet(nn.Module):
 		# computing IoU between detections and ground truth
 		dt_gt_iou = self.iou(dtBoxesData, gtBoxesData)  #MJ: dt_gt_iou: shape = (822,98)
   
-        #################################################################
-        #MJ: make dt_gt_iou between beat and downbeat zero.
+		#################################################################
+		#MJ: make dt_gt_iou between beat and downbeat zero.
+
+		if multilabel:
+			dt_gt_same_class = torch.eq(detection_classes.reshape(-1, 1), gt_classes.reshape(1, -1))
+			dt_gt_iou = torch.where(
+				dt_gt_same_class,
+				dt_gt_iou,
+				torch.zeros(dt_gt_same_class.shape).to(dt_gt_same_class.device)
+			)
 
 		### label matching for training
 		# original implementation works on COCO dataset and has 'gt_crowd' detections
@@ -402,10 +434,10 @@ class GNet(nn.Module):
 		# since we are using VRD (and VG later) datasets, our logic doesn't have to be complicated
 		# labels, dt_gt_matching = self.dtGtMatching(dt_gt_iou, objectnessScores)
 		# start = timer.time()
-		labels, _ = self.dtGtMatching(dt_gt_iou, objectnessScores) # #objectnessScores: objectnessScores of all detections. They are used only for speed up of the search/match??.
-        #MJ: objectnessScores: Recomputed scores for the detections
-        # The output of self.dtGtMatching(dt_gt_iou, objectnessScores):
-        #   labels: Boolean tensor representing which detections/samples are to be treated as true positives
+		labels, _ = self.dtGtMatching(dt_gt_iou, objectnessScores) # #objectnessScores: objectnessScores of all detections thru gnet. 
+		#MJ: objectnessScores: Recomputed scores for the detections
+		# The output of self.dtGtMatching(dt_gt_iou, objectnessScores):
+		#   labels: Boolean tensor representing which detections/samples are to be treated as true positives
 		#   dt_gt_matching: which detection gets matched to which gt
 		# print (timer.time() - start)
 
@@ -416,8 +448,8 @@ class GNet(nn.Module):
   #MJ: https://pytorch.org/docs/stable/generated/torch.nn.BCEWithLogitsLoss.html
   
 		sampleLosses = sampleLossFunction(objectnessScores, labels)  #MJ: labels = targets: their values should be 0 or 1
-                   #MJ: labels: Boolean tensor representing which detections/samples are to be treated as true positives
-                   # loss(objectnessScores, labels) = list( labels[i]*log (sigmoid(objectnessScores[i])) + (1-labels[i] * log( 1- sigmoid(objectnessScores[i])))
+				   #MJ: labels: Boolean tensor representing which detections/samples are to be treated as true positives
+				   # loss(objectnessScores, labels) = list( labels[i]*log (sigmoid(objectnessScores[i])) + (1-labels[i] * log( 1- sigmoid(objectnessScores[i])))
 
 		lossNormalized = torch.mean(sampleLosses)
 		lossUnnormalized = torch.sum(sampleLosses)
@@ -581,7 +613,7 @@ class GNet(nn.Module):
 	def iou(boxes1, boxes2):
 		"""
 			Compute IoU values between boxes1 and boxes2;
-           boxes1, boxes2: (x1, y1, width, height, x2, y2, area)
+		   boxes1, boxes2: (x1, y1, width, height, x2, y2, area)
 		"""
 		area1 = boxes1[6].reshape(-1, 1) # area1 set in rows: 1xN
 		area2 = boxes2[6].reshape(1, -1) # area2 set in columns: Mx1

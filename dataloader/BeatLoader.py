@@ -1,5 +1,6 @@
 import os
 import json
+import glob
 
 import numpy as np
 from tqdm import tqdm
@@ -13,16 +14,20 @@ class BeatLoader(data.Dataset):
         - this loader should mimic what 'nms' gets as input in 'fnet'
         - for now will limit it to just the detections TODO: add image features later
     """
-    def __init__(self, data_dir):
+    def __init__(self, dir):
         """
             Initializing data loader
             Input
-                data_dir: directory where detections for individual images are present
+                dir: directory where detections for individual images are present
         """
-        self.data_dir = data_dir
+        self.dir = dir
 
         # reading in the images present
-        self.files = os.listdir(self.data_dir)
+        if os.path.basename(self.dir) == "beatles":
+            self.files = glob.glob(os.path.join(self.dir, "gt_intervals", "**", "*.txt"), recursive=True)
+        else:
+            self.files = os.listdir(os.path.join(self.dir, "gt_intervals"))
+
         self.data = []
         
         self.load()
@@ -36,66 +41,67 @@ class BeatLoader(data.Dataset):
     
     def load(self):
         for index in tqdm(range(len(self.files))):
-            selected_audio_file = self.files[index]
-            selected_file_name = selected_audio_file.replace('.wav', '.txt')
+            #selected_audio_file = self.files[index]
+            #selected_file_name = selected_audio_file.replace('.wav', '.txt')
+            selected_file = self.files[index]
             
             data = {}
 
             gt_boxes = []
+            gt_classes = []
+
             detections = []
+            detection_classes = []
+
             scores = []
 
-            gt_file = open(os.path.join(self.data_dir, "..", "gt_intervals", selected_file_name))
+            gt_file = open(os.path.join(self.dir, selected_file))
             gt_lines = gt_file.readlines()
             gt_file.close()
 
-            num_classes = 2
-            
-            for class_id in range(num_classes):
-                class_name = None
-                if class_id == 0:
-                    class_name = "downbeat"
-                elif class_id == 1:
-                    class_name = "beat"
-                else:
-                    raise NotImplementedError
-
-                for gt_line in gt_lines:
-                    gt_line = gt_line.replace('\n', '')
-                    extracted_data_from_gt_line = gt_line.split(' ')
-
-                    if extracted_data_from_gt_line[0] != class_name:
-                        continue
-                    
-                    gt_box = [float(item) for item in extracted_data_from_gt_line[1:]]
-
-                    gt_boxes.append(gt_box)
-
-                pred_file = open(os.path.join(self.data_dir, "..", "pred_intervals", selected_file_name))
-                pred_lines = pred_file.readlines()
-                pred_file.close()
+            for gt_line in gt_lines:
+                gt_line = gt_line.replace('\n', '')
+                extracted_data_from_gt_line = gt_line.split(' ')
                 
-                for pred_line in pred_lines:
-                    pred_line = pred_line.replace('\n', '')
-                    extracted_data_from_pred_line = pred_line.split(' ')
+                gt_box = [float(item) for item in extracted_data_from_gt_line[1:]]
+                if extracted_data_from_gt_line[0] == "downbeat":
+                    gt_class = 0
+                elif extracted_data_from_gt_line[0] == "beat":
+                    gt_class = 1
 
-                    if extracted_data_from_gt_line[0] != class_name:
-                        continue
+                gt_boxes.append(gt_box)
+                gt_classes.append(gt_class)
 
-                    detection = [float(item) for item in extracted_data_from_pred_line[2:]]
-                    score = float(extracted_data_from_pred_line[1])
-                    
-                    detections.append(detection)
-                    scores.append(score)
-                    
-                data = {
-                    'gt_boxes': np.array(gt_boxes),
-                    'detections': np.array(detections),
-                    'scores': np.array(scores),
-                }
+            #pred_file = open(os.path.join(self.dir, "pred_intervals", selected_file_name))
+            pred_file = open(selected_file.replace('gt_intervals', 'pred_intervals'))
+            pred_lines = pred_file.readlines()
+            pred_file.close()
+            
+            for pred_line in pred_lines:
+                pred_line = pred_line.replace('\n', '')
+                extracted_data_from_pred_line = pred_line.split(' ')
 
-                self.data.append(data)
-            #END for class_id in range(num_classes)
+                detection = [float(item) for item in extracted_data_from_pred_line[2:]]
+                if extracted_data_from_pred_line[0] == "downbeat":
+                    detection_class = 0
+                elif extracted_data_from_pred_line[0] == "beat":
+                    detection_class = 1
+
+                score = float(extracted_data_from_pred_line[1])
+                
+                detections.append(detection)
+                detection_classes.append(detection_class)
+                scores.append(score)
+                
+            data = {
+                'gt_boxes': np.array(gt_boxes),
+                'gt_classes': np.array(gt_classes),
+                'detections': np.array(detections),
+                'detection_classes': np.array(detection_classes),
+                'scores': np.array(scores),
+            }
+
+            self.data.append(data)
         #END for index in tqdm(range(len(self.files)))
             
     @staticmethod

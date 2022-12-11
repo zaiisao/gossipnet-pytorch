@@ -8,6 +8,8 @@ from model.gnet import GNet
 #from dataloader.detVRDLoader import detVRDLoader
 from dataloader.BeatLoader import BeatLoader
 
+#dataset_names = ["ballroom", "hains", "beatles", "rwc_popular"]
+dataset_names = ["beatles"]
 
 def main():
     """
@@ -25,11 +27,18 @@ def main():
     print ("Loading VRD training dataset, "),
     # trainData = detVRDLoader("./data/vrd/train-fnet-no12000-nms0.7/")
     # trainData = detVRDLoader("./data/vrd/train/")
-    trainData = BeatLoader(args.data_dir)
+    
+    train_datasets = []
+    for dataset_name in dataset_names:
+        dataset_dir = os.path.join(args.data_dir, dataset_name)
+        train_dataset = BeatLoader(dataset_dir)
+        train_datasets.append(train_dataset)
+    
+    train_dataset_list = torch.utils.data.ConcatDataset(train_datasets)
 
-    print ("{} files loaded".format(len(trainData)))
+    print ("{} files loaded".format(len(train_dataset_list)))
 
-    trainLoader = torch.utils.data.DataLoader(trainData, 
+    trainLoader = torch.utils.data.DataLoader(train_dataset_list, 
                                                 batch_size=args.batch_size, 
                                                 shuffle=True,
                                                 #collate_fn=detVRDLoader.collate)
