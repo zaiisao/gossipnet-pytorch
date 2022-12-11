@@ -26,7 +26,7 @@ class BeatLoader(data.Dataset):
         if os.path.basename(self.dir) == "beatles":
             self.files = glob.glob(os.path.join(self.dir, "gt_intervals", "**", "*.txt"), recursive=True)
         else:
-            self.files = os.listdir(os.path.join(self.dir, "gt_intervals"))
+            self.files = glob.glob(os.path.join(self.dir, "gt_intervals", "*.txt"))
 
         self.data = []
         

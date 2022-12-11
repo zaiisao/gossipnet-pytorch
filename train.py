@@ -9,7 +9,7 @@ from model.gnet import GNet
 from dataloader.BeatLoader import BeatLoader
 
 dataset_names = ["ballroom", "hains", "beatles", "rwc_popular"]
-#dataset_names = ["beatles"]
+#dataset_names = ["ballroom"]
 
 def main():
     """
