@@ -8,8 +8,8 @@ from model.gnet import GNet
 #from dataloader.detVRDLoader import detVRDLoader
 from dataloader.BeatLoader import BeatLoader
 
-#dataset_names = ["ballroom", "hains", "beatles", "rwc_popular"]
-dataset_names = ["beatles"]
+dataset_names = ["ballroom", "hains", "beatles", "rwc_popular"]
+#dataset_names = ["beatles"]
 
 def main():
     """
