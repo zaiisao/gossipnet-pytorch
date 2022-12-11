@@ -239,7 +239,7 @@ class GNet(nn.Module):
 		self.weightInitMethod = 'xavier'
 		self.initializeParameters(method=self.weightInitMethod)
 
-	def forward(self, batch, no_detections=300): #MJ: data is a batch with batch_size =1
+	def forward(self, batch, no_detections=300, min_score=0.0): #MJ: data is a batch with batch_size =1
 		"""
 			Main computation
 		"""
@@ -250,10 +250,11 @@ class GNet(nn.Module):
 		all_objectiveness_scores = []
 
 		for item in batch:
-			#boxes_to_keep = item['scores'] > 0.2  #MJ: boxes_to_keep is a boolean array
+			boxes_to_keep = item['scores'] > min_score  #MJ: boxes_to_keep is a boolean array
 
-			#item['scores'] = item['scores'][boxes_to_keep]
-			#item['detections'] = item['detections'][boxes_to_keep]
+			item['scores'] = item['scores'][boxes_to_keep]
+			item['detections'] = item['detections'][boxes_to_keep]
+			item['detection_classes'] = item['detection_classes'][boxes_to_keep]
 
 			if 'gt_boxes' not in item:
 				objectnessScores = self.compute(item, no_detections)

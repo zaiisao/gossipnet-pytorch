@@ -9,7 +9,7 @@ from model.gnet import GNet
 from dataloader.BeatLoader import BeatLoader
 
 dataset_names = ["ballroom", "hains", "beatles", "rwc_popular"]
-#dataset_names = ["ballroom"]
+#dataset_names = ["beatles"]
 
 def main():
     """
@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--lr", type=float, default=0.0001)
     parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--no_detections", type=int, default=9999999)
+    parser.add_argument("--min_score", type=float, default=0.0)
     args = parser.parse_args()
 
     print ("Loading VRD training dataset, "),
@@ -224,7 +225,7 @@ def train(loader, network, optimizer, epoch, args):
 
         start1 = timer.time()
         # computing forward pass and the loss
-        lossNormalized, lossUnnormalized, _ = network(batch, no_detections=args.no_detections)
+        lossNormalized, lossUnnormalized, _ = network(batch, no_detections=args.no_detections, min_score=args.min_score)
         #MJ: within network:  lossNormalized = torch.mean(sampleLosses)
 		#MJ:                  lossUnnormalized = torch.sum(sampleLosses)
         end1 = timer.time()
