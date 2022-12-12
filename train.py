@@ -8,8 +8,8 @@ from model.gnet import GNet
 #from dataloader.detVRDLoader import detVRDLoader
 from dataloader.BeatLoader import BeatLoader
 
-dataset_names = ["ballroom", "hains", "beatles", "rwc_popular"]
-#dataset_names = ["beatles"]
+#dataset_names = ["ballroom", "hains", "beatles", "rwc_popular"]
+dataset_names = ["rwc_popular"]
 
 def main():
     """
@@ -222,10 +222,20 @@ def train(loader, network, optimizer, epoch, args):
     for i, batch in enumerate(loader): #For each batch
         # if (i == 100):
         #     break
+        
+        detections, gts = batch
+        
+        if torch.cuda.is_available():
+            detections = detections.cuda()
+            gts = gts.cuda()
 
         start1 = timer.time()
         # computing forward pass and the loss
-        lossNormalized, lossUnnormalized, _ = network(batch, no_detections=args.no_detections, min_score=args.min_score)
+        lossNormalized, lossUnnormalized, _ = network(
+            (detections, gts),
+            no_detections=args.no_detections,
+            min_score=args.min_score
+        )
         #MJ: within network:  lossNormalized = torch.mean(sampleLosses)
 		#MJ:                  lossUnnormalized = torch.sum(sampleLosses)
         end1 = timer.time()

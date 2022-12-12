@@ -249,25 +249,62 @@ class GNet(nn.Module):
 		all_nonnormalized_losses = []
 		all_objectiveness_scores = []
 
-		for item in batch:
-			boxes_to_keep = item['scores'] > min_score  #MJ: boxes_to_keep is a boolean array
+		if len(batch) == 2:
+			detection_batch, gt_batch = batch
+		else:
+			detection_batch = batch
+			gt_batch = None
 
-			item['scores'] = item['scores'][boxes_to_keep]
-			item['detections'] = item['detections'][boxes_to_keep]
-			item['detection_classes'] = item['detection_classes'][boxes_to_keep]
+		batch_size = detection_batch.size(dim=0)
+		detection_max_length = detection_batch.size(dim=1)
 
-			if 'gt_boxes' not in item:
-				objectnessScores = self.compute(item, no_detections)
+		all_objectiveness_scores = torch.ones((batch_size, detection_max_length)) * -1
+		if torch.cuda.is_available():
+			all_objectiveness_scores = all_objectiveness_scores.cuda()
+
+		for item_id, detections in enumerate(detection_batch):
+			detection_boxes = detections[detections[:, 0] != -1, :4]
+			detection_classes = detections[detections[:, 0] != -1, 4]
+			scores = detections[detections[:, 0] != -1, 5]
+
+			if gt_batch is not None:
+				gts = gt_batch[item_id]
+				gt_boxes = gts[gts[:, 0] != -1, :4]
+				gt_classes = gts[gts[:, 0] != -1, 4]
+
+			#boxes_to_keep = item['scores'] > min_score  #MJ: boxes_to_keep is a boolean array
+			boxes_to_keep = scores > min_score
+
+			#item['scores'] = item['scores'][boxes_to_keep]
+			#item['detections'] = item['detections'][boxes_to_keep]
+			#item['detection_classes'] = item['detection_classes'][boxes_to_keep]
+			scores = scores[boxes_to_keep]
+			detection_boxes = detection_boxes[boxes_to_keep]
+			detection_classes = detection_classes[boxes_to_keep]
+   
+			item_dict = {
+				'scores': scores,
+				'detections': detection_boxes,
+				'detection_classes': detection_classes,
+			}
+
+			#if 'gt_boxes' not in item:
+			if gts is None:
+				objectnessScores = self.compute(item_dict, no_detections)
 			else:
-				losses, objectnessScores = self.compute(item, no_detections)
+				item_dict['gt_boxes'] = gt_boxes
+				item_dict['gt_classes'] = gt_classes
+
+				losses, objectnessScores = self.compute(item_dict, no_detections)
 
 				all_normalized_losses.append(losses[0])
 				all_nonnormalized_losses.append(losses[1])
 
-			all_objectiveness_scores.append(objectnessScores)
+			#all_objectiveness_scores.append(objectnessScores)
+			all_objectiveness_scores[item_id, :objectnessScores.size(dim=0)] = objectnessScores
 
-		if torch.cuda.is_available():
-			all_objectiveness_scores = torch.stack(all_objectiveness_scores).to(device='cuda')
+		#if torch.cuda.is_available():
+			#all_objectiveness_scores = torch.stack(all_objectiveness_scores).to(device='cuda')
 
 		if len(all_normalized_losses) == 0 or len(all_nonnormalized_losses) == 0:
 			return all_objectiveness_scores
@@ -283,7 +320,7 @@ class GNet(nn.Module):
   
 		if 'gt_boxes' in data:
 			gtBoxes = data['gt_boxes']		              #annotations for gt boxes                       gtBoxes : len=98
-			gtBoxes = torch.from_numpy(gtBoxes).cuda()
+			#gtBoxes = torch.from_numpy(gtBoxes).cuda()
 			gtBoxesData = self.getBoxData(gtBoxes)
 
 		multilabel = False
@@ -505,20 +542,35 @@ class GNet(nn.Module):
 			dtIndex = sortedIndexs[i]  #MJ: sortedIndexs from objectnessScores
 			iou = iouThresh
 			match = -1
+			# match2 = -1
+   
+			dt_gt_iou_unmatched = torch.where(
+				isGtMatched != 1,
+				dt_gt_iou[dtIndex],
+				torch.zeros(isGtMatched.shape).to(isGtMatched.device) * -1
+			)
 
-			for gtIndex in range(numGts):  #MJ: 98
-				# is gt already matched
-				if isGtMatched[gtIndex] == 1:
-					continue
+			iou = torch.max(dt_gt_iou_unmatched)
 
-				# continue until we get a better detection
-				if dt_gt_iou[dtIndex, gtIndex] < iou:
-					continue
+			if iou < iouThresh:
+				iou = iouThresh
+			else:
+				match = torch.argmax(dt_gt_iou_unmatched)
+			# print(1, iou2, match2)
+
+			# for gtIndex in range(numGts):  #MJ: 98
+			# 	# is gt already matched
+			# 	if isGtMatched[gtIndex] == 1:
+			# 		continue
+
+			# 	# continue until we get a better detection
+			# 	if dt_gt_iou[dtIndex, gtIndex] < iou:
+			# 		continue
 				
-				# store the best detection
-				iou = dt_gt_iou[dtIndex, gtIndex]  #MJ: dtIndex=460; gtIndex=85, say; iou = 0.7792
-				match = gtIndex
-
+			# 	# store the best detection
+			# 	iou = dt_gt_iou[dtIndex, gtIndex]  #MJ: dtIndex=460; gtIndex=85, say; iou = 0.7792
+			# 	match = gtIndex
+			# print(2, iou, match)
 			if (match > -1):
 				isGtMatched[match] = 1  #MJ: gt box at index match is matched to detection at index dtIndex
 				labels[dtIndex] = 1.

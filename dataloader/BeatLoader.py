@@ -1,6 +1,7 @@
 import os
 import json
 import glob
+import torch
 
 import numpy as np
 from tqdm import tqdm
@@ -111,7 +112,43 @@ class BeatLoader(data.Dataset):
             For our case custom writing it for batch_size =1
         """
         # return batch items as a list
-        return items
+        gt_boxes = [torch.from_numpy(s['gt_boxes']) for s in items]
+        gt_classes = [torch.from_numpy(s['gt_classes']) for s in items]
+
+        detections = [torch.from_numpy(s['detections']) for s in items]
+        detection_classes = [torch.from_numpy(s['detection_classes']) for s in items]
+        scores = [torch.from_numpy(s['scores']) for s in items]
+
+        max_num_gts = max(gt_box.shape[0] for gt_box in gt_boxes)
+        max_num_detections = max(detection.shape[0] for detection in detections)
+        
+        if max_num_gts > 0:
+            new_gts = torch.ones((len(gt_boxes), max_num_gts, 5)) * -1
+            if max_num_gts > 0:
+                for idx, gt_box in enumerate(gt_boxes):
+                    gt_class = gt_classes[idx]
+
+                    if gt_box.shape[0] > 0:
+                        new_gts[idx, :gt_box.shape[0], :4] = gt_box
+                        new_gts[idx, :gt_box.shape[0], 4] = gt_class
+        else:
+            new_gts = torch.ones((len(gt_boxes), 1, 5)) * -1
+        
+        if max_num_detections > 0:
+            new_detections = torch.ones((len(detections), max_num_detections, 6)) * -1
+            if max_num_detections > 0:
+                for idx, detection_box in enumerate(detections):
+                    detection_class = detection_classes[idx]
+                    score = scores[idx]
+
+                    if detection_box.shape[0] > 0:
+                        new_detections[idx, :detection_box.shape[0], :4] = detection_box
+                        new_detections[idx, :detection_box.shape[0], 4] = detection_class
+                        new_detections[idx, :detection_box.shape[0], 5] = score
+        else:
+            new_detections = torch.ones((len(gt_boxes), 1, 6)) * -1
+
+        return new_detections, new_gts
 
     def __len__(self):
         """
