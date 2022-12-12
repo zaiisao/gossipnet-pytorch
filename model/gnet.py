@@ -247,7 +247,7 @@ class GNet(nn.Module):
 		# data = data[0]
 		all_normalized_losses = []
 		all_nonnormalized_losses = []
-		all_objectiveness_scores = []
+		#all_objectiveness_scores = []
 
 		if len(batch) == 2:
 			detection_batch, gt_batch = batch
@@ -258,9 +258,10 @@ class GNet(nn.Module):
 		batch_size = detection_batch.size(dim=0)
 		detection_max_length = detection_batch.size(dim=1)
 
-		all_objectiveness_scores = torch.ones((batch_size, detection_max_length)) * -1
-		if torch.cuda.is_available():
-			all_objectiveness_scores = all_objectiveness_scores.cuda()
+		if not self.training:
+			all_objectiveness_scores = torch.ones((batch_size, detection_max_length)) * -1
+			if torch.cuda.is_available():
+				all_objectiveness_scores = all_objectiveness_scores.cuda()
 
 		for item_id, detections in enumerate(detection_batch):
 			detection_boxes = detections[detections[:, 0] != -1, :4]
@@ -300,8 +301,9 @@ class GNet(nn.Module):
 				all_normalized_losses.append(losses[0])
 				all_nonnormalized_losses.append(losses[1])
 
-			#all_objectiveness_scores.append(objectnessScores)
-			all_objectiveness_scores[item_id, :objectnessScores.size(dim=0)] = objectnessScores
+			if not self.training:
+				#all_objectiveness_scores.append(objectnessScores)
+				all_objectiveness_scores[item_id, :objectnessScores.size(dim=0)] = objectnessScores
 
 		#if torch.cuda.is_available():
 			#all_objectiveness_scores = torch.stack(all_objectiveness_scores).to(device='cuda')
@@ -312,7 +314,10 @@ class GNet(nn.Module):
 		normalized_loss = sum(all_normalized_losses) / len(all_normalized_losses)
 		nonnormalized_loss = sum(all_nonnormalized_losses) / len(all_nonnormalized_losses)
 
-		return normalized_loss, nonnormalized_loss, all_objectiveness_scores
+		if self.training:
+			return all_objectiveness_scores
+		else:
+			return normalized_loss, nonnormalized_loss, all_objectiveness_scores
 
 	def compute(self, data, no_detections):
 		detScores = data['scores'][:no_detections]  #confidence scores for bbox predictions by beat-fcos. detScores :len=822, say
