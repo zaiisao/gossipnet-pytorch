@@ -15,13 +15,16 @@ class BeatLoader(data.Dataset):
         - this loader should mimic what 'nms' gets as input in 'fnet'
         - for now will limit it to just the detections TODO: add image features later
     """
-    def __init__(self, dir):
+    def __init__(self, dir, no_detections=300, min_score=0.0):
         """
             Initializing data loader
             Input
                 dir: directory where detections for individual images are present
         """
+
         self.dir = dir
+        self.no_detections = no_detections
+        self.min_score = min_score
 
         # reading in the images present
         if os.path.basename(self.dir) == "beatles":
@@ -93,13 +96,25 @@ class BeatLoader(data.Dataset):
                 detections.append(detection)
                 detection_classes.append(detection_class)
                 scores.append(score)
-                
+
+            gt_boxes = np.array(gt_boxes)
+            gt_classes = np.array(gt_classes)
+            detections = np.array(detections)
+            detection_classes = np.array(detection_classes)
+            scores = np.array(scores)
+
+            boxes_to_keep = scores > self.min_score
+
+            scores = scores[boxes_to_keep][:self.no_detections]
+            detections = detections[boxes_to_keep][:self.no_detections]
+            detection_classes = detection_classes[boxes_to_keep][:self.no_detections]
+
             data = {
-                'gt_boxes': np.array(gt_boxes),
-                'gt_classes': np.array(gt_classes),
-                'detections': np.array(detections),
-                'detection_classes': np.array(detection_classes),
-                'scores': np.array(scores),
+                'gt_boxes': gt_boxes,
+                'gt_classes': gt_classes,
+                'detections': detections,
+                'detection_classes': detection_classes,
+                'scores': scores,
             }
 
             self.data.append(data)

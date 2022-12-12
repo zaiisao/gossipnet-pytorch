@@ -32,7 +32,7 @@ def main():
     train_datasets = []
     for dataset_name in dataset_names:
         dataset_dir = os.path.join(args.data_dir, dataset_name)
-        train_dataset = BeatLoader(dataset_dir)
+        train_dataset = BeatLoader(dataset_dir, args.no_detections, args.min_score)
         train_datasets.append(train_dataset)
     
     train_dataset_list = torch.utils.data.ConcatDataset(train_datasets)
@@ -233,9 +233,9 @@ def train(loader, network, optimizer, epoch, args):
         # computing forward pass and the loss
         #lossNormalized, lossUnnormalized, _ = network(
         lossNormalized, lossUnnormalized = network(
-            (detections, gts),
-            no_detections=args.no_detections,
-            min_score=args.min_score
+            (detections, gts)#,
+            #no_detections=args.no_detections,
+            #min_score=args.min_score
         )
         #MJ: within network:  lossNormalized = torch.mean(sampleLosses)
 		#MJ:                  lossUnnormalized = torch.sum(sampleLosses)

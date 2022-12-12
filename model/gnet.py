@@ -239,7 +239,8 @@ class GNet(nn.Module):
 		self.weightInitMethod = 'xavier'
 		self.initializeParameters(method=self.weightInitMethod)
 
-	def forward(self, batch, no_detections=300, min_score=0.0): #MJ: data is a batch with batch_size =1
+	#def forward(self, batch, no_detections=300, min_score=0.0): #MJ: data is a batch with batch_size =1
+	def forward(self, batch):
 		"""
 			Main computation
 		"""
@@ -274,14 +275,14 @@ class GNet(nn.Module):
 				gt_classes = gts[gts[:, 0] != -1, 4]
 
 			#boxes_to_keep = item['scores'] > min_score  #MJ: boxes_to_keep is a boolean array
-			boxes_to_keep = scores > min_score
+			# boxes_to_keep = scores > min_score
 
-			#item['scores'] = item['scores'][boxes_to_keep]
-			#item['detections'] = item['detections'][boxes_to_keep]
-			#item['detection_classes'] = item['detection_classes'][boxes_to_keep]
-			scores = scores[boxes_to_keep]
-			detection_boxes = detection_boxes[boxes_to_keep]
-			detection_classes = detection_classes[boxes_to_keep]
+			# #item['scores'] = item['scores'][boxes_to_keep]
+			# #item['detections'] = item['detections'][boxes_to_keep]
+			# #item['detection_classes'] = item['detection_classes'][boxes_to_keep]
+			# scores = scores[boxes_to_keep]
+			# detection_boxes = detection_boxes[boxes_to_keep]
+			# detection_classes = detection_classes[boxes_to_keep]
    
 			item_dict = {
 				'scores': scores,
@@ -291,12 +292,14 @@ class GNet(nn.Module):
 
 			#if 'gt_boxes' not in item:
 			if gts is None:
-				objectnessScores = self.compute(item_dict, no_detections)
+				#objectnessScores = self.compute(item_dict, no_detections)
+				objectnessScores = self.compute(item_dict)
 			else:
 				item_dict['gt_boxes'] = gt_boxes
 				item_dict['gt_classes'] = gt_classes
 
-				losses, objectnessScores = self.compute(item_dict, no_detections)
+				#losses, objectnessScores = self.compute(item_dict, no_detections)
+				losses, objectnessScores = self.compute(item_dict)
 
 				all_normalized_losses.append(losses[0])
 				all_nonnormalized_losses.append(losses[1])
@@ -319,9 +322,10 @@ class GNet(nn.Module):
 		else:
 			return normalized_loss, nonnormalized_loss, all_objectiveness_scores
 
-	def compute(self, data, no_detections):
-		detScores = data['scores'][:no_detections]  #confidence scores for bbox predictions by beat-fcos. detScores :len=822, say
-		dtBoxes = data['detections'][:no_detections] #bbox predictions by beat-fcos                       dtBoxes : len=822
+	#def compute(self, data, no_detections):
+	def compute(self, data):
+		detScores = data['scores']#[:no_detections]  #confidence scores for bbox predictions by beat-fcos. detScores :len=822, say
+		dtBoxes = data['detections']#[:no_detections] #bbox predictions by beat-fcos                       dtBoxes : len=822
   
 		if 'gt_boxes' in data:
 			gtBoxes = data['gt_boxes']		              #annotations for gt boxes                       gtBoxes : len=98
@@ -333,7 +337,7 @@ class GNet(nn.Module):
 			multilabel = True
 
 			gt_classes = data['gt_classes']
-			detection_classes = data['detection_classes'][:no_detections]
+			detection_classes = data['detection_classes']#[:no_detections]
 
 			if isinstance(detScores, np.ndarray):
 				gt_classes = torch.from_numpy(gt_classes).type(torch.cuda.FloatTensor)
