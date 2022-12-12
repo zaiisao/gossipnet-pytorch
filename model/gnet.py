@@ -315,7 +315,7 @@ class GNet(nn.Module):
 		nonnormalized_loss = sum(all_nonnormalized_losses) / len(all_nonnormalized_losses)
 
 		if self.training:
-			return all_objectiveness_scores
+			return normalized_loss, nonnormalized_loss
 		else:
 			return normalized_loss, nonnormalized_loss, all_objectiveness_scores
 

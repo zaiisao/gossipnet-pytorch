@@ -231,7 +231,8 @@ def train(loader, network, optimizer, epoch, args):
 
         start1 = timer.time()
         # computing forward pass and the loss
-        lossNormalized, lossUnnormalized, _ = network(
+        #lossNormalized, lossUnnormalized, _ = network(
+        lossNormalized, lossUnnormalized = network(
             (detections, gts),
             no_detections=args.no_detections,
             min_score=args.min_score
